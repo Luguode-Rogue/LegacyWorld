@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LegacyWorldSettings>
+  <Enabled>true</Enabled>
+  <AutoExportOnSave>true</AutoExportOnSave>
+  <LogEnabled>true</LogEnabled>
+  <RestoreKingdoms>true</RestoreKingdoms>
+  <RestoreClans>true</RestoreClans>
+  <RestoreSettlements>true</RestoreSettlements>
+  <RestoreClanEconomy>true</RestoreClanEconomy>
+  <CreateMissingClans>false</CreateMissingClans>
+</LegacyWorldSettings>

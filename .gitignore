@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+.vs/
+
+# Runtime logs & generated data
+*.log
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Generated runtime data
+Legacy.json
