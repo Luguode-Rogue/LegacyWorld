@@ -13,6 +13,10 @@ namespace LegacyWorld.Core.Models
         /// <summary>模板来源：player=玩家本体，companion=玩家招募过的 NPC。</summary>
         public string Source { get; set; }
 
+        /// <summary>模板来源存档的世界 Id（Campaign.UniqueGameId）。
+        /// 用于区分"同一存档"与"跨存档"：防二重身仅在当前 WorldId 与该值相等时生效。</summary>
+        public string WorldId { get; set; }
+
         /// <summary>完整姓名。</summary>
         public string Name { get; set; }
 

@@ -21,5 +21,9 @@ namespace LegacyWorld.Core.Serialization
         public static string Serialize(LegacyData data) => JsonConvert.SerializeObject(data, _settings);
         public static LegacyData Deserialize(string json)
             => string.IsNullOrWhiteSpace(json) ? null : JsonConvert.DeserializeObject<LegacyData>(json, _settings);
+
+        public static string SerializeHeroes(HeroProfileList list) => JsonConvert.SerializeObject(list, _settings);
+        public static HeroProfileList DeserializeHeroes(string json)
+            => string.IsNullOrWhiteSpace(json) ? null : JsonConvert.DeserializeObject<HeroProfileList>(json, _settings);
     }
 }

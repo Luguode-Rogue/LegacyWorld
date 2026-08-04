@@ -21,6 +21,11 @@ namespace LegacyWorld.Core.Models
 
         private static readonly List<Entry> _entries = new List<Entry>();
 
+        /// <summary>
+        /// 已复刻的 (Name, Source) 键集合，用于防止同一存档内重复复刻出多个同名英雄。
+        /// </summary>
+        private static readonly HashSet<string> _keys = new HashSet<string>();
+
         public static IReadOnlyList<Entry> Entries => _entries;
 
         public static void Register(Entry entry)
@@ -28,8 +33,22 @@ namespace LegacyWorld.Core.Models
             if (entry == null) return;
             if (entry.Status == null) entry.Status = "成功";
             _entries.Add(entry);
+            _keys.Add(MakeKey(entry.Name, entry.Source));
         }
 
-        public static void Clear() => _entries.Clear();
+        /// <summary>
+        /// 是否已复刻过该 (Name, Source) 组合。用于复刻前查重，避免复制出重复 NPC。
+        /// </summary>
+        public static bool Contains(string name, string source)
+            => _keys.Contains(MakeKey(name, source));
+
+        private static string MakeKey(string name, string source)
+            => $"{name ?? ""}|{source ?? ""}";
+
+        public static void Clear()
+        {
+            _entries.Clear();
+            _keys.Clear();
+        }
     }
 }

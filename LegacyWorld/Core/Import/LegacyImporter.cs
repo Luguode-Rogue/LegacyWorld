@@ -3,6 +3,7 @@ using LegacyWorld.Adapter;
 using LegacyWorld.Core;
 using LegacyWorld.Core.Models;
 using LegacyWorld.Core.Settings;
+using TaleWorlds.CampaignSystem;
 
 namespace LegacyWorld.Core.Import
 {
@@ -15,8 +16,10 @@ namespace LegacyWorld.Core.Import
         public static ImportResult Apply(IGameAdapter adapter, LegacyData data, LegacySettings settings)
         {
             AffixLogger.Info("IMPORT", "================ 导入开始 ================");
-            AffixLogger.Info("IMPORT", $"遗产世界: {data.WorldId} | 版本 {data.Version} | 家族 {data.Clans.Count} 个");
-            DumpCurrentState(adapter, "【导入前】当前游戏状态");
+            string currentWorldId = adapter.GetWorldId();
+            AffixLogger.Info("IMPORT", $"遗产世界: {data.WorldId} | 版本 {data.Version}");
+            AffixLogger.Info("IMPORT", $"[NPC] 当前游戏世界: {adapter.GetWorldId()}");
+            AffixLogger.Info("IMPORT", $"[NPC] 设置 RestoreHeroes={settings.RestoreHeroes} | 遗产英雄模板数={data.HeroProfiles?.Count ?? 0}");
 
             var result = new ImportResult();
             result.KingdomsRestored = KingdomImporter.Restore(adapter, data, settings);
@@ -27,36 +30,62 @@ namespace LegacyWorld.Core.Import
             result.HeroesResurrectFailed = 0;
             if (settings.RestoreHeroes && data.HeroProfiles != null && data.HeroProfiles.Count > 0)
             {
-                AffixLogger.Info("IMPORT", $"开始复刻英雄模板: {data.HeroProfiles.Count} 个");
+                AffixLogger.Info("IMPORT", $"[NPC] 开始复刻英雄模板: 共 {data.HeroProfiles.Count} 个");
+                int skipped = 0;
                 foreach (var profile in data.HeroProfiles)
                 {
                     if (profile == null) continue;
+                    AffixLogger.Info("IMPORT",
+                        $"[NPC] 处理模板 #{result.HeroesResurrected + skipped + 1}: Name={profile.Name}, Source={profile.Source}, Culture={profile.CultureId}, Level={profile.Level}");
+                    int before = CountWanderers(adapter);
                     try
                     {
-                        adapter.ResurrectHero(profile);
-                        result.HeroesResurrected++;
+                        adapter.ResurrectHero(profile, currentWorldId);
+                        int after = CountWanderers(adapter);
+                        if (after > before)
+                        {
+                            result.HeroesResurrected++;
+                            AffixLogger.Info("IMPORT", $"[NPC] → 实际新建了 1 个游荡英雄（当前游荡英雄总数={after}）");
+                        }
+                        else
+                        {
+                            skipped++;
+                            AffixLogger.Info("IMPORT", $"[NPC] → 未新建（已存在同名，跳过）。当前游荡英雄总数={after}");
+                        }
                     }
                     catch (Exception ex)
                     {
                         result.HeroesResurrectFailed++;
-                        AffixLogger.Error("IMPORT", $"复刻英雄失败: {profile.Name} ({profile.Source})", ex);
+                        AffixLogger.Error("IMPORT", $"[NPC] 复刻英雄异常: {profile.Name} ({profile.Source})", ex);
                     }
                 }
-                AffixLogger.Info("IMPORT", $"英雄模板复刻完成: 成功 {result.HeroesResurrected} 个 / 失败 {result.HeroesResurrectFailed} 个");
+                AffixLogger.Info("IMPORT", $"[NPC] 英雄复刻结束: 新建 {result.HeroesResurrected} 个 / 跳过(已存在) {skipped} 个 / 异常 {result.HeroesResurrectFailed} 个");
             }
             else if (settings.RestoreHeroes)
             {
-                AffixLogger.Info("IMPORT", "复原英雄已启用，但遗产数据中无英雄模板记录");
+                AffixLogger.Info("IMPORT", "[NPC] 复原英雄已启用，但遗产数据中无英雄模板记录，跳过");
             }
             else
             {
-                AffixLogger.Info("IMPORT", "复原英雄未启用（设置 RestoreHeroes=false），跳过英雄复刻");
+                AffixLogger.Info("IMPORT", "[NPC] 复原英雄未启用（RestoreHeroes=false），跳过英雄复刻");
             }
 
-            DumpCurrentState(adapter, "【导入后】当前游戏状态");
-            AffixLogger.Info("IMPORT", $"导入编排完成: {result.KingdomsRestored} 王国 / {result.ClansRestored} 家族 / {result.SettlementsRestored} 定居点 / {result.HeroesResurrected} 英雄");
+            AffixLogger.Info("IMPORT", $"导入编排完成: {result.KingdomsRestored} 王国 / {result.ClansRestored} 家族 / {result.SettlementsRestored} 定居点 / {result.HeroesResurrected} 英雄(新建)");
             AffixLogger.Info("IMPORT", "================ 导入结束 ================");
             return result;
+        }
+
+        /// <summary>
+        /// 统计当前游戏内游荡英雄数量，用于 NPC 复刻前后对比，确认是否真的新建了对象。
+        /// </summary>
+        private static int CountWanderers(IGameAdapter adapter)
+        {
+            int n = 0;
+            foreach (var h in Hero.AllAliveHeroes)
+            {
+                if (h != null && h.IsWanderer) n++;
+            }
+            return n;
         }
 
         /// <summary>

@@ -36,7 +36,7 @@ namespace LegacyWorld.Adapter
 
         // ===== 英雄模板（A 方案：玩家本体 + 玩家招募过且存活的非固定名 NPC）=====
         IEnumerable<LegacyWorld.Core.Models.HeroProfile> GetHeroProfiles();
-        void ResurrectHero(LegacyWorld.Core.Models.HeroProfile profile);
+        void ResurrectHero(LegacyWorld.Core.Models.HeroProfile profile, string currentWorldId);
     }
 
     public interface IKingdomInfo

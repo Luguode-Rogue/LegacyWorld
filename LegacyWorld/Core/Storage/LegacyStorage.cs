@@ -12,6 +12,7 @@ namespace LegacyWorld.Core.Storage
     {
         private static readonly string _folder = GetModuleRoot();
         private static readonly string _filePath = Path.Combine(_folder, "Legacy.json");
+        private static readonly string _heroesFilePath = Path.Combine(_folder, "LegacyHeroes.json");
 
         private static string GetModuleRoot()
         {
@@ -49,6 +50,27 @@ namespace LegacyWorld.Core.Storage
                 return File.ReadAllText(_filePath);
             }
             catch (Exception ex) { AffixLogger.Error("STORAGE", "读取 Legacy.json 失败", ex); return null; }
+        }
+
+        public static void WriteHeroes(string json)
+        {
+            try
+            {
+                if (!Directory.Exists(_folder)) Directory.CreateDirectory(_folder);
+                File.WriteAllText(_heroesFilePath, json);
+                AffixLogger.Info("STORAGE", $"已写入玩家人物遗产: {_heroesFilePath}");
+            }
+            catch (Exception ex) { AffixLogger.Error("STORAGE", "写入 LegacyHeroes.json 失败", ex); }
+        }
+
+        public static string ReadHeroes()
+        {
+            try
+            {
+                if (!File.Exists(_heroesFilePath)) { AffixLogger.Warn("STORAGE", $"玩家人物遗产文件不存在: {_heroesFilePath}"); return null; }
+                return File.ReadAllText(_heroesFilePath);
+            }
+            catch (Exception ex) { AffixLogger.Error("STORAGE", "读取 LegacyHeroes.json 失败", ex); return null; }
         }
     }
 }

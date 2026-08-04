@@ -152,9 +152,9 @@ namespace LegacyWorld.BannerlordAdapter
             return result;
         }
 
-        public void ResurrectHero(LegacyWorld.Core.Models.HeroProfile profile)
+        public void ResurrectHero(LegacyWorld.Core.Models.HeroProfile profile, string currentWorldId)
         {
-            HeroResurrectionFactory.Resurrect(profile);
+            HeroResurrectionFactory.Resurrect(profile, currentWorldId);
         }
 
         private static LegacyWorld.Core.Models.HeroProfile BuildHeroProfile(Hero hero, string source)
@@ -163,6 +163,7 @@ namespace LegacyWorld.BannerlordAdapter
             var profile = new LegacyWorld.Core.Models.HeroProfile
             {
                 Source = source,
+                WorldId = Campaign.Current?.UniqueGameId ?? "0",
                 Name = hero.Name?.ToString(),
                 FirstName = hero.FirstName?.ToString(),
                 CultureId = hero.CharacterObject?.Culture?.StringId,

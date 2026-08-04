@@ -132,12 +132,13 @@ namespace LegacyWorld.Bannerlord
                 }
                 else
                 {
-                    var hero = TaleWorlds.CampaignSystem.Hero.Find(e.HeroStringId);
+                    // 不依赖可能随存档失效的 HeroStringId，改用姓名在当前游戏的 Hero.All 中查找游荡英雄。
+                    var hero = FindWandererByName(e.Name);
                     bool exists = hero != null;
                     bool isAlive = exists && hero.IsAlive;
                     bool isWanderer = exists && hero.IsWanderer;
                     if (isAlive) alive++;
-                    status = !exists ? "对象缺失" : (!isAlive ? "已死亡" : (isWanderer ? "游荡中" : $"职业={hero.Occupation}"));
+                    status = !exists ? "对象缺失(可能已死亡或不在当前世界)" : (!isAlive ? "已死亡" : (isWanderer ? "游荡中" : $"职业={hero.Occupation}"));
                 }
                 string line = $"  • {e.Name}（{e.Source}, Lv{e.Level}, 文化={e.CultureId}）→ {status}";
                 sb.AppendLine(line);
@@ -146,6 +147,21 @@ namespace LegacyWorld.Bannerlord
             sb.AppendLine($"成功存活/游荡中：{alive}/{entries.Count}");
             InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), TaleWorlds.Library.Colors.Green));
             AffixLogger.Info("BEHAVIOR", $"验证：已复刻英雄 {entries.Count} 名，成功且存活 {alive} 名");
+        }
+
+        /// <summary>
+        /// 在当前游戏中按姓名查找复刻出的游荡英雄。
+        /// 使用 Hero.AllAliveHeroes 而非可能随存读档失效的 StringId，避免误报“对象缺失”。
+        /// </summary>
+        private TaleWorlds.CampaignSystem.Hero FindWandererByName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (var h in TaleWorlds.CampaignSystem.Hero.AllAliveHeroes)
+            {
+                if (h == null || !h.IsActive) continue;
+                if (h.IsWanderer && h.Name != null && h.Name.ToString() == name) return h;
+            }
+            return null;
         }
 
         // 兜底：若 runner 未被注入（极少见），仍由 HourlyTick 消费标志执行

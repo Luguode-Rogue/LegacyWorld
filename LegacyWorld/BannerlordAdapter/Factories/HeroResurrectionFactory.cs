@@ -21,11 +21,48 @@ namespace LegacyWorld.BannerlordAdapter.Factories
     /// </summary>
     public static class HeroResurrectionFactory
     {
-        public static void Resurrect(HeroProfile profile)
+        public static void Resurrect(HeroProfile profile, string currentWorldId = null)
         {
             if (profile == null) return;
             try
             {
+                // 0. 防本存档二重身：player/companion 模板指向"自己或当前队友"。
+                //    关键：仅当"当前存档 WorldId == 遗产模板 WorldId"（即同一个存档）时，
+                //    才判断原 Hero 是否仍存活；命中则跳过，避免在本存档内生成二重身。
+                //    若是跨存档（A 导出、B 导入，WorldId 不同）——即使姓名雷同也只是不同生命，
+                //    必须放行复刻（"遇到原来的自己"），绝不能靠名字误拦。
+                if (!string.IsNullOrEmpty(currentWorldId) && currentWorldId == profile.WorldId && IsStillAliveInCurrentSave(profile))
+                {
+                    AffixLogger.Info("HERO", $"防二重身：模板来源 Source={profile.Source} 的「{profile.Name}」在当前存档中仍然存活（自己/当前队友），跳过复刻以避免本存档二重身");
+                    ResurrectedHeroTracker.Register(new ResurrectedHeroTracker.Entry
+                    {
+                        Name = profile.Name,
+                        Source = profile.Source,
+                        CultureId = profile.CultureId,
+                        Level = profile.Level,
+                        Status = "跳过：当前存档仍存活的自己/队友（防二重身）"
+                    });
+                    return;
+                }
+
+                // 1. 查重：扫描当前游戏内已有的游荡英雄，若存在同名同文化的，说明已经复刻过，跳过。
+                //    依赖游戏内实际对象而非进程内存，因此跨不同世界存档切换、重开游戏、多次点导入都不会复制出重复 NPC。
+                var existing = FindExistingWanderer(profile.Name, profile.CultureId);
+                if (existing != null)
+                {
+                    AffixLogger.Info("HERO", $"查重命中：游戏内已存在同名游荡英雄「{existing.Name}」(StringId={existing.StringId})，跳过复刻以避免重复: Source={profile.Source}, Name={profile.Name}");
+                    ResurrectedHeroTracker.Register(new ResurrectedHeroTracker.Entry
+                    {
+                        HeroStringId = existing.StringId,
+                        Name = profile.Name,
+                        Source = profile.Source,
+                        CultureId = profile.CultureId,
+                        Level = profile.Level,
+                        Status = "跳过：游戏内已存在同名游荡英雄"
+                    });
+                    return;
+                }
+
                 AffixLogger.Info("HERO", $"开始复刻英雄模板: Source={profile.Source}, Name={profile.Name}, Culture={profile.CultureId}");
 
                 // 1. 选定与文化匹配的游荡英雄模板（决定种族，避免外观错位）
@@ -138,11 +175,64 @@ namespace LegacyWorld.BannerlordAdapter.Factories
             }
         }
 
+        /// <summary>
+        /// 判断模板对应的原 Hero 在当前存档中是否仍然存活。
+        /// 用于"防本存档二重身"：player 模板比对 Hero.MainHero（当前本人），
+        /// companion 模板在 PlayerClan.Companions 中比对（当前队友）。
+        /// 命中即说明"现在的自己/队友"还在游戏里，不应再复刻出一个游荡英雄。
+        /// 只有在换了新档（原自己/队友已不在当前游戏）时才返回 false，从而允许复刻（遇到原来的自己）。
+        /// </summary>
+        private static bool IsStillAliveInCurrentSave(HeroProfile profile)
+        {
+            if (profile == null || string.IsNullOrEmpty(profile.Name)) return false;
+
+            if (profile.Source == "player")
+            {
+                var main = Hero.MainHero;
+                return main != null && main.IsAlive && main.Name != null && main.Name.ToString() == profile.Name;
+            }
+
+            if (profile.Source == "companion")
+            {
+                var playerClan = Clan.PlayerClan;
+                if (playerClan != null && playerClan.Companions != null)
+                {
+                    foreach (var c in playerClan.Companions)
+                    {
+                        if (c != null && c.IsAlive && c.Name != null && c.Name.ToString() == profile.Name)
+                            return true;
+                    }
+                }
+                return false;
+            }
+
+            // 其它来源（wanderer/other）按姓名在游荡英雄中查重即可，不属于"自己/队友"范畴
+            return false;
+        }
+
         private static int CalculateAge(int level)
         {
             // 经验公式：以 18 岁为起点，每级约 0.3 岁，粗略还原年龄
             if (level <= 0) return 25;
             return 18 + (int)(level * 0.3);
+        }
+
+        /// <summary>
+        /// 在当前游戏内查找是否已存在同名且文化匹配的游荡英雄。
+        /// 用于复刻前查重，避免在不同世界存档间来回导入时复制出重复 NPC。
+        /// </summary>
+        private static Hero FindExistingWanderer(string name, string cultureId)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (var h in Hero.AllAliveHeroes)
+            {
+                if (h == null || !h.IsActive || !h.IsWanderer) continue;
+                if (h.Name == null || h.Name.ToString() != name) continue;
+                // 文化匹配（Culture 可能为 null，仅当 profile 指定了文化时才校验）
+                if (!string.IsNullOrEmpty(cultureId) && h.Culture != null && h.Culture.StringId != cultureId) continue;
+                return h;
+            }
+            return null;
         }
     }
 }
