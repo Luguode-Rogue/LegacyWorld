@@ -33,6 +33,11 @@ namespace LegacyWorld.Adapter
         ISettlementInfo FindSettlement(string id);
         void ChangeSettlementOwner(ISettlementInfo settlement, IClanInfo newOwner);
         void SetSettlementProsperity(ISettlementInfo settlement, float prosperity);
+        /// <summary>
+        /// 将定居点变为叛军所有（游戏原生 CreateSettlementRebelClan 机制）。
+        /// 用于在旧档玩家家族于新档不存在时，让城池归属叛军而非凭空消失或白给玩家本体。
+        /// </summary>
+        void MakeSettlementRebel(ISettlementInfo settlement);
 
         // ===== 英雄模板（A 方案：玩家本体 + 玩家招募过且存活的非固定名 NPC）=====
         IEnumerable<LegacyWorld.Core.Models.HeroProfile> GetHeroProfiles();
@@ -45,6 +50,7 @@ namespace LegacyWorld.Adapter
         string Name { get; }
         IClanInfo RulerClan { get; }
         string Culture { get; }
+        bool IsDestroyed { get; }
     }
 
     public interface IClanInfo

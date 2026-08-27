@@ -115,7 +115,13 @@ namespace LegacyWorld.Bannerlord
             var entries = LegacyWorld.Core.Models.ResurrectedHeroTracker.Entries;
             if (entries.Count == 0)
             {
-                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 当前没有已复刻的英雄记录。可先「手动应用世界状态」或开新档。", Colors.Yellow));
+                // 边界修复（#8 验证 UI 误报）：内存表在新游戏/读档后会被清空，
+                // 但复刻记录已持久化进 LegacyHeroes.json。回退读取文件记录，
+                // 避免玩家先导入再读档后误以为「没生效」。
+                if (TryListResurrectedFromDisk())
+                    return;
+
+                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 当前没有已复刻的英雄记录（本会话与文件中均无）。可先「手动应用世界状态」或开新档。", Colors.Yellow));
                 AffixLogger.Info("BEHAVIOR", "验证：复刻英雄表为空");
                 return;
             }
@@ -162,6 +168,45 @@ namespace LegacyWorld.Bannerlord
                 if (h.IsWanderer && h.Name != null && h.Name.ToString() == name) return h;
             }
             return null;
+        }
+
+        /// <summary>
+        /// 回退：从 LegacyHeroes.json 读取上次导入持久化的复刻记录并展示。
+        /// 用于内存 ResurrectedHeroTracker 已清空（读档/新游戏）时的验证。
+        /// </summary>
+        private bool TryListResurrectedFromDisk()
+        {
+            try
+            {
+                var json = LegacyWorld.Core.Storage.LegacyStorage.ReadHeroes();
+                if (string.IsNullOrEmpty(json)) return false;
+                var heroes = LegacyWorld.Core.Serialization.LegacySerializer.DeserializeHeroes(json);
+                var records = heroes?.ResurrectedHeroes;
+                if (records == null || records.Count == 0) return false;
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"[LegacyWorld] 文件中共有 {records.Count} 条已复刻记录（来自上次导入，当前内存表已清空）：");
+                int aliveNow = 0;
+                foreach (var r in records)
+                {
+                    bool exists = false, isAlive = false;
+                    var h = FindWandererByName(r.Name);
+                    if (h != null) { exists = true; isAlive = h.IsAlive; if (isAlive) aliveNow++; }
+                    string status = !exists ? "对象不在当前世界" : (isAlive ? "存活中" : "已死亡");
+                    string line = $"  • {r.Name}（{r.Source}, Lv{r.Level}, 文化={r.CultureId}）→ {status} [导入于 {r.RestoredAt}]";
+                    sb.AppendLine(line);
+                    AffixLogger.Info("VERIFY", line);
+                }
+                sb.AppendLine($"仍存活于当前世界：{aliveNow}/{records.Count}");
+                InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), TaleWorlds.Library.Colors.Green));
+                AffixLogger.Info("BEHAVIOR", $"验证（文件回退）：已复刻记录 {records.Count} 条，当前存活 {aliveNow} 条");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AffixLogger.Warn("BEHAVIOR", $"读取持久化复刻记录失败: {ex.Message}");
+                return false;
+            }
         }
 
         // 兜底：若 runner 未被注入（极少见），仍由 HourlyTick 消费标志执行

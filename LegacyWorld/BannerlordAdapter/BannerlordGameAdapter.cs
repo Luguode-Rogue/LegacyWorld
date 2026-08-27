@@ -3,12 +3,16 @@ using System.Linq;
 using TaleWorlds.Library;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.Core;
 using LegacyWorld.Adapter;
 using LegacyWorld.BannerlordAdapter.Factories;
 using LegacyWorld.Core;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
 using TaleWorlds.CampaignSystem.Extensions;
+using System;
+using Helpers;
 
 namespace LegacyWorld.BannerlordAdapter
 {
@@ -126,6 +130,80 @@ namespace LegacyWorld.BannerlordAdapter
             if (s != null) SettlementChangeFactory.SetProsperity(s, (int)prosperity);
         }
 
+        public void MakeSettlementRebel(ISettlementInfo settlement)
+        {
+            var s = ObjectFinder.FindSettlementById(settlement?.Id);
+            if (s != null) CreateRebelClanForSettlement(s);
+        }
+
+        /// <summary>
+        /// 主动为定居点创建独立叛军家族（不依赖 RebellionsCampaignBehavior 的每日 tick 时序）。
+        /// 复刻原版 CreateRebelPartyAndClan 的核心步骤：造叛军领袖 → 造叛军家族 → 向原阵营宣战 → 把城归属叛军。
+        /// 这样在导入阶段（新游戏初始化时 tick 尚未开始）也能立即生成叛军，而非把城挂起或归还原国家。
+        /// </summary>
+        private static void CreateRebelClanForSettlement(Settlement settlement)
+        {
+            try
+            {
+                CultureObject culture = settlement.Culture;
+                if (culture == null)
+                {
+                    AffixLogger.Warn("REBEL", $"定居点 {settlement.Name} 无文化，跳过叛军生成");
+                    return;
+                }
+
+                // 1) 取一个叛军英雄模板（优先 RebelliousHeroTemplates，缺失则退回 BasicTroop）。
+                CharacterObject leaderTemplate = null;
+                var templates = culture.RebelliousHeroTemplates;
+                if (templates != null)
+                {
+                    var enumerable = templates as IEnumerable<CharacterObject>;
+                    if (enumerable != null)
+                    {
+                        var list = enumerable as List<CharacterObject> ?? enumerable.ToList();
+                        if (list.Count > 0)
+                            leaderTemplate = list[MBRandom.RandomInt(0, list.Count - 1)];
+                    }
+                }
+                if (leaderTemplate == null)
+                    leaderTemplate = culture.BasicTroop;
+
+                if (leaderTemplate == null)
+                {
+                    AffixLogger.Warn("REBEL", $"定居点 {settlement.Name} 无可用英雄模板，跳过叛军生成");
+                    return;
+                }
+
+                // 2) 造叛军领袖英雄（与原版 CreateRebelHeroInternal 一致）。
+                Hero leader = HeroCreator.CreateSpecialHero(leaderTemplate, settlement, null, null, MBRandom.RandomInt(25, 40));
+
+                // 3) 造叛军家族（Clan.CreateSettlementRebelClan 内部会 SetLeader/SetInitialHomeSettlement/CalculateMidSettlement）。
+                int iconId = -1;
+                if (culture.PossibleClanBannerIconsIDs != null && culture.PossibleClanBannerIconsIDs.Count > 0)
+                    iconId = culture.PossibleClanBannerIconsIDs.GetRandomElement();
+
+                Clan rebelClan = Clan.CreateSettlementRebelClan(settlement, leader, iconId);
+                rebelClan.IsNoble = true;
+
+                // 4) 向原所属阵营宣战（与原版一致）。
+                IFaction mapFaction = settlement.MapFaction;
+                if (mapFaction != null && mapFaction != rebelClan)
+                    DeclareWarAction.ApplyByRebellion(rebelClan, mapFaction);
+
+                // 5) 把城归属叛军家族（原版 ChangeOwnerOfSettlementAction.ApplyByRebellion）。
+                ChangeOwnerOfSettlementAction.ApplyByRebellion(leader, settlement);
+
+                // 6) 生成一支领主队伍驻守，避免叛军家族无队伍。
+                MobilePartyHelper.SpawnLordParty(leader, settlement);
+
+                AffixLogger.Info("REBEL", $"为定居点 {settlement.Name} 主动创建叛军家族 {rebelClan.Name}（领袖 {leader.Name}）");
+            }
+            catch (Exception ex)
+            {
+                AffixLogger.Warn("REBEL", $"主动创建叛军家族失败（{settlement?.Name}）：{ex.Message}");
+            }
+        }
+
         // ===== 英雄模板（A 方案：玩家本体 + 玩家招募过且存活的非固定名 NPC）=====
         public IEnumerable<LegacyWorld.Core.Models.HeroProfile> GetHeroProfiles()
         {
@@ -170,24 +248,52 @@ namespace LegacyWorld.BannerlordAdapter
                 IsFemale = hero.IsFemale,
                 Level = hero.Level,
                 Occupation = hero.Occupation.ToString(),
-                StaticBodyProperties = bp.ToString(),
+                // 边界：BodyProperties 为值类型（struct），不能用 ?. 运算符；此处直接取串，
+                // 异常时兜底为空串避免 NRE/断言中断。
+                StaticBodyProperties = SafeBodyProperties(bp),
                 Weight = hero.Weight,
                 Build = hero.Build
             };
 
-            foreach (var skill in Skills.All)
+            // 边界：Skills.All / TraitObject.All 在战役早期可能为空，判空避免 NRE。
+            var allSkills = Skills.All;
+            if (allSkills != null)
             {
-                if (skill == null) continue;
-                profile.Skills[skill.StringId] = hero.GetSkillValue(skill);
+                foreach (var skill in allSkills)
+                {
+                    if (skill == null) continue;
+                    profile.Skills[skill.StringId] = hero.GetSkillValue(skill);
+                }
             }
 
-            foreach (var trait in TraitObject.All)
+            var allTraits = TraitObject.All;
+            if (allTraits != null)
             {
-                int value = hero.GetTraitLevel(trait);
-                if (value != 0) profile.Traits[trait.StringId] = value;
+                foreach (var trait in allTraits)
+                {
+                    if (trait == null) continue;
+                    int value = hero.GetTraitLevel(trait);
+                    if (value != 0) profile.Traits[trait.StringId] = value;
+                }
             }
 
             return profile;
+        }
+
+        /// <summary>
+        /// 安全地将 BodyProperties 转为字符串。BodyProperties 为值类型，无效/异常时兜底为空串。
+        /// </summary>
+        private static string SafeBodyProperties(BodyProperties bp)
+        {
+            try
+            {
+                var s = bp.ToString();
+                return string.IsNullOrEmpty(s) ? string.Empty : s;
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private class KingdomInfoWrapper : IKingdomInfo
@@ -198,6 +304,7 @@ namespace LegacyWorld.BannerlordAdapter
             public string Name => _k.Name.ToString();
             public IClanInfo RulerClan => _k.RulingClan != null ? new ClanInfoWrapper(_k.RulingClan) : null;
             public string Culture => _k.Culture?.StringId ?? "unknown";
+            public bool IsDestroyed => _k.IsEliminated;
         }
 
         private class ClanInfoWrapper : IClanInfo

@@ -16,6 +16,7 @@ namespace LegacyWorld.Core.Models
             public string Source;         // player / companion
             public string CultureId;      // 原文化
             public int Level;             // 原等级
+            public string WorldId;        // 遗产来源世界 WorldId（用于跨进程持久化去重）
             public string Status = "成功"; // 成功 / 失败原因
         }
 

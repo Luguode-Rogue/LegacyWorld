@@ -38,8 +38,11 @@ namespace LegacyWorld.Core.Settings
             }
             catch (System.Exception ex)
             {
-                AffixLogger.Error("SETTINGS", "加载设置失败，使用默认值", ex);
+                AffixLogger.Error("SETTINGS", "加载设置失败（XML 损坏/缺字段），使用默认值并重建", ex);
                 Settings = new LegacyWorldSettingsData();
+                // 边界：损坏的 XML 保留为 .bak，避免下次加载再次失败且便于排查。
+                try { if (File.Exists(_xmlPath)) File.Copy(_xmlPath, _xmlPath + ".bak", true); } catch { }
+                Save();
             }
         }
 
@@ -58,6 +61,7 @@ namespace LegacyWorld.Core.Settings
 
         public static void SyncFromMCM(LegacyWorldMCMSettings mcm)
         {
+            if (mcm == null) { AffixLogger.Warn("SETTINGS", "SyncFromMCM: mcm 为空（MCM 未加载），跳过"); return; }
             Settings.Enabled = mcm.Enabled;
             Settings.AutoExportOnSave = mcm.AutoExportOnSave;
             Settings.LogEnabled = mcm.LogEnabled;

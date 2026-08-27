@@ -19,5 +19,25 @@ namespace LegacyWorld.Core.Models
         /// 从而避免反复添加重复的遗留玩家 NPC。
         /// </summary>
         [JsonProperty("applied_world_ids")] public List<string> AppliedWorldIds { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 已复刻英雄的持久化快照，跨进程生效（写入 LegacyHeroes.json）。
+        /// 内存表 ResurrectedHeroTracker 在新游戏/读档后会被清空，但本列表始终保留，
+        /// 使「列出已复刻英雄（验证）」按钮在读档后仍能查到上次导入的真实记录，避免误报"无记录"。
+        /// </summary>
+        [JsonProperty("resurrected_heroes")] public List<ResurrectedHeroRecord> ResurrectedHeroes { get; set; } = new List<ResurrectedHeroRecord>();
+    }
+
+    /// <summary>
+    /// 单个已复刻英雄的持久化记录（跨进程，存入 LegacyHeroes.json）。
+    /// </summary>
+    public class ResurrectedHeroRecord
+    {
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("source")] public string Source { get; set; }
+        [JsonProperty("world_id")] public string WorldId { get; set; }
+        [JsonProperty("level")] public int Level { get; set; }
+        [JsonProperty("culture_id")] public string CultureId { get; set; }
+        [JsonProperty("restored_at")] public string RestoredAt { get; set; }
     }
 }

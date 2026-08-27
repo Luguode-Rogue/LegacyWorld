@@ -3,7 +3,7 @@
     "Bannerlord": {
       "commandName": "Executable",
       "executablePath": "$(GameFolder)\\bin\\$(GameBinariesFolder)\\Bannerlord.exe",
-      "commandLineArgs": "/singleplayer _MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*NavalDLC*$(ModuleId)*_MODULES_",
+      "commandLineArgs": "/singleplayer _MODULES_*Bannerlord.Harmony*Bannerlord.ButterLib*Bannerlord.UIExtenderEx*Bannerlord.MBOptionScreen*Native*SandBoxCore*CustomBattle*Sandbox*StoryMode*NavalDLC*BannerlordHtmlUI*New_ZZZF*ProjectileTrajectorySystem*LegacyWorld*XinLiu_SkillsOverhaul*QuickPickup*CleanHeroCreate*DesperateThrow*SocialSkillsOverhaul*SmeltingOverhaul*NpcCapSplit*BetterTime*_MODULES_",
       "workingDirectory": "$(GameFolder)\\bin\\$(GameBinariesFolder)"
     },
     "BLSE Bannerlord": {
