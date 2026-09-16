@@ -185,6 +185,10 @@ namespace LegacyWorld.BannerlordAdapter
                 Clan rebelClan = Clan.CreateSettlementRebelClan(settlement, leader, iconId);
                 rebelClan.IsNoble = true;
 
+                // 原版 RebellionsCampaignBehavior 的每日 Tick 会直接按 rebelClan 索引私有计时字典。
+                // CreateSettlementRebelClan 本身不会完成这一步，因此必须在转移城镇所有权前登记。
+                SettlementChangeFactory.RegisterRebelForAutoPromotion(rebelClan);
+
                 // 4) 向原所属阵营宣战（与原版一致）。
                 IFaction mapFaction = settlement.MapFaction;
                 if (mapFaction != null && mapFaction != rebelClan)

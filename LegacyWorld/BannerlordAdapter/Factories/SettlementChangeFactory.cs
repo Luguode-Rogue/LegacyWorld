@@ -152,7 +152,7 @@ namespace LegacyWorld.BannerlordAdapter.Factories
         /// 将叛军家族登记进 RebellionsCampaignBehavior 的计时字典，使原生行为能在约 30 天后自动转正。
         /// 因原数字段为 private，使用反射注入；反射失败时仅记录警告（不影响叛军已创建的事实）。
         /// </summary>
-        private static void RegisterRebelForAutoPromotion(Clan rebelClan)
+        internal static void RegisterRebelForAutoPromotion(Clan rebelClan)
         {
             try
             {
