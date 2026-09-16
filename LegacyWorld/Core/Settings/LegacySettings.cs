@@ -8,7 +8,9 @@ namespace LegacyWorld.Core.Settings
     {
         public bool RestoreKingdoms { get; set; } = true;
         public bool RestoreClans { get; set; } = true;
+        public bool RestoreClanKingdomMembership { get; set; } = true;
         public bool RestoreSettlements { get; set; } = true;
+        public bool RestoreSettlementOwnership { get; set; } = true;
         public bool RestoreClanEconomy { get; set; } = true;
         public bool CreateMissingClans { get; set; }
         public bool RestoreHeroes { get; set; } = false;

@@ -23,7 +23,9 @@ namespace LegacyWorld.Bannerlord
         public override void RegisterEvents()
         {
             CampaignEvents.OnBeforeSaveEvent.AddNonSerializedListener(this, OnBeforeSave);
-            CampaignEvents.OnNewGameCreatedEvent.AddNonSerializedListener(this, OnNewGameCreated);
+            // 1.5 高级开局世界场景在 OnNewGameCreatedEvent 中重构王国/领地。
+            // LegacyWorld 必须等待所有新游戏 FollowUp 完成后再导入，避免提前制造叛军 Clan 等状态污染原版场景处理。
+            CampaignEvents.OnNewGameCreatedPartialFollowUpEndEvent.AddNonSerializedListener(this, OnNewGameCreated);
             CampaignEvents.HourlyTickEvent.AddNonSerializedListener(this, OnTick);
 
             // 注入手动按钮的执行体，使 MCM 点击即时生效（无需等待 HourlyTick）

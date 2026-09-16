@@ -3,6 +3,10 @@
   <Enabled>true</Enabled>
   <AutoExportOnSave>true</AutoExportOnSave>
   <LogEnabled>true</LogEnabled>
+  <RespectAdvancedStartOptions>true</RespectAdvancedStartOptions>
+  <AdvancedStartSkipKingdomRulers>true</AdvancedStartSkipKingdomRulers>
+  <AdvancedStartSkipClanKingdoms>true</AdvancedStartSkipClanKingdoms>
+  <AdvancedStartSkipSettlementOwners>true</AdvancedStartSkipSettlementOwners>
   <RestoreKingdoms>true</RestoreKingdoms>
   <RestoreClans>true</RestoreClans>
   <RestoreSettlements>true</RestoreSettlements>

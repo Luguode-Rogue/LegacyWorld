@@ -11,6 +11,7 @@ using LegacyWorld.Core.Serialization;
 using LegacyWorld.Core.Settings;
 using LegacyWorld.Core.Storage;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Extensions;
 using TaleWorlds.Library;
 
 namespace LegacyWorld.Bannerlord
@@ -194,9 +195,9 @@ namespace LegacyWorld.Bannerlord
         private static bool ApplyImport(LegacyData legacyData, HeroProfileList heroes, HashSet<string> foreignWorlds)
         {
             ResurrectedHeroTracker.Clear();
-            LegacyWorldSettingsManager.RefreshSettings();
+            var importSettings = BuildEffectiveImportSettings();
             AffixLogger.Info("SERVICE", $"开始导入：世界状态来源={legacyData.WorldId}, 玩家人物遗产={heroes?.Profiles.Count ?? 0} 个（含其它世界 {foreignWorlds.Count} 个）");
-            var result = LegacyImporter.Apply(_adapter, legacyData, LegacyWorldSettingsManager.ToImportSettings());
+            var result = LegacyImporter.Apply(_adapter, legacyData, importSettings);
             AffixLogger.Info("SERVICE",
                 $"导入完成: {result.KingdomsRestored} 王国 / {result.ClansRestored} 家族 / {result.SettlementsRestored} 定居点 / {result.HeroesResurrected} 英雄(新建)");
 
@@ -205,6 +206,80 @@ namespace LegacyWorld.Bannerlord
             // 「列出已复刻英雄」按钮仍能从文件读到上次导入的真实记录。
             PersistResurrectedHeroRecords(heroes);
             return true;
+        }
+
+
+        /// <summary>
+        /// Bannerlord 1.5 高级开局兼容。
+        /// 原版世界场景/政治身份优先；只关闭会覆盖政治与领地结构的子项，
+        /// 家族经济、定居点繁荣度和英雄复刻仍按普通导入设置执行。
+        /// </summary>
+        private static LegacySettings BuildEffectiveImportSettings()
+        {
+            LegacyWorldSettingsManager.RefreshSettings();
+            var importSettings = LegacyWorldSettingsManager.ToImportSettings();
+            var compatibility = LegacyWorldSettingsManager.Settings;
+
+            if (!compatibility.RespectAdvancedStartOptions)
+                return importSettings;
+
+            var advancedStart = Campaign.Current?.AdvancedStartData;
+            if (advancedStart == null)
+                return importSettings;
+
+            string scenario = advancedStart.GetScenario();
+            string startType = advancedStart.GetStartType();
+
+            bool hasWorldScenario = !string.IsNullOrEmpty(scenario)
+                                    && !string.Equals(scenario, "none", StringComparison.OrdinalIgnoreCase);
+            bool hasPoliticalStartType = IsPoliticalAdvancedStartType(startType);
+
+            if (!hasWorldScenario && !hasPoliticalStartType)
+                return importSettings;
+
+            var skipped = new List<string>();
+
+            if (compatibility.AdvancedStartSkipKingdomRulers && importSettings.RestoreKingdoms)
+            {
+                importSettings.RestoreKingdoms = false;
+                skipped.Add("王国统治者");
+            }
+
+            if (compatibility.AdvancedStartSkipClanKingdoms && importSettings.RestoreClans)
+            {
+                importSettings.RestoreClanKingdomMembership = false;
+                skipped.Add("家族所属王国");
+            }
+
+            if (compatibility.AdvancedStartSkipSettlementOwners && importSettings.RestoreSettlements)
+            {
+                importSettings.RestoreSettlementOwnership = false;
+                skipped.Add("领地所有权");
+            }
+
+            if (skipped.Count > 0)
+            {
+                var source = new List<string>();
+                if (hasWorldScenario) source.Add($"场景={scenario}");
+                if (hasPoliticalStartType) source.Add($"身份={startType}");
+
+                string message = $"[LegacyWorld] 检测到高级开局（{string.Join("，", source)}），以游戏开局选项为准。本次不导入：{string.Join("、", skipped)}。可在 MCM「高级开局兼容」中调整。";
+                AffixLogger.Warn("COMPAT", message);
+                InformationManager.DisplayMessage(new InformationMessage(message, Colors.Yellow));
+            }
+
+            return importSettings;
+        }
+
+        private static bool IsPoliticalAdvancedStartType(string startType)
+        {
+            if (string.IsNullOrEmpty(startType))
+                return false;
+
+            return string.Equals(startType, "king", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(startType, "vassal", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(startType, "mercenary", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(startType, "fleetadmiral", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

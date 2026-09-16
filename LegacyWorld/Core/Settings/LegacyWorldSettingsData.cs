@@ -12,6 +12,12 @@ namespace LegacyWorld.Core.Settings
         public bool AutoExportOnSave = true;
         public bool LogEnabled = true;
 
+        // Bannerlord 1.5 高级开局兼容：默认以游戏开局选项为准。
+        public bool RespectAdvancedStartOptions = true;
+        public bool AdvancedStartSkipKingdomRulers = true;
+        public bool AdvancedStartSkipClanKingdoms = true;
+        public bool AdvancedStartSkipSettlementOwners = true;
+
         public bool RestoreKingdoms = true;
         public bool RestoreClans = true;
         public bool RestoreSettlements = true;

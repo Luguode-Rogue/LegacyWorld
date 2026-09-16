@@ -65,11 +65,32 @@ namespace LegacyWorld.Core.Settings
         [SettingPropertyGroup("导入数据类别", GroupOrder = 1)]
         public bool RestoreHeroes { get; set; } = false;
 
+
+        [SettingPropertyBool("高级开局以游戏选项为准", Order = 0, RequireRestart = false, IsToggle = true,
+            HintText = "检测到 1.5 高级开局世界场景或政治身份开局时，优先保留游戏生成的政治/领地结构。关闭后 LegacyWorld 可按普通导入设置覆盖高级开局结果。")]
+        [SettingPropertyGroup("高级开局兼容", GroupOrder = 2)]
+        public bool RespectAdvancedStartOptions { get; set; } = true;
+
+        [SettingPropertyBool("不恢复王国统治者", Order = 1, RequireRestart = false,
+            HintText = "高级开局兼容生效时，不用遗产数据覆盖游戏场景生成的王国统治者。")]
+        [SettingPropertyGroup("高级开局兼容", GroupOrder = 2)]
+        public bool AdvancedStartSkipKingdomRulers { get; set; } = true;
+
+        [SettingPropertyBool("不恢复家族所属王国", Order = 2, RequireRestart = false,
+            HintText = "高级开局兼容生效时，不用遗产数据覆盖家族所属王国；家族金币、声望、影响力仍可按原设置恢复。")]
+        [SettingPropertyGroup("高级开局兼容", GroupOrder = 2)]
+        public bool AdvancedStartSkipClanKingdoms { get; set; } = true;
+
+        [SettingPropertyBool("不恢复领地所有权", Order = 3, RequireRestart = false,
+            HintText = "高级开局兼容生效时，不用遗产数据覆盖城镇/城堡归属；繁荣度仍可按原设置恢复。")]
+        [SettingPropertyGroup("高级开局兼容", GroupOrder = 2)]
+        public bool AdvancedStartSkipSettlementOwners { get; set; } = true;
+
         // 真正的行为按钮：参照 MCM 指南第四章 [SettingPropertyButton] + Action。
         // MCMv5 要求按钮属性必须有 setter，故绑定到只读委托字段（setter 直接忽略传入值）。
         [SettingPropertyButton("手动导出世界状态", Content = "立即导出", Order = 0,
             HintText = "将当前世界状态写入 Legacy.json（无视「存档时自动导出」开关）。")]
-        [SettingPropertyGroup("操作", GroupOrder = 2)]
+        [SettingPropertyGroup("操作", GroupOrder = 3)]
         public Action ManualExportButton
         {
             get => _manualExportAction;
@@ -78,7 +99,7 @@ namespace LegacyWorld.Core.Settings
 
         [SettingPropertyButton("手动应用世界状态", Content = "立即应用", Order = 1,
             HintText = "将已导出的 Legacy.json 应用到当前新游戏（跳过同世界检测）。")]
-        [SettingPropertyGroup("操作", GroupOrder = 2)]
+        [SettingPropertyGroup("操作", GroupOrder = 3)]
         public Action ManualApplyButton
         {
             get => _manualApplyAction;
@@ -87,7 +108,7 @@ namespace LegacyWorld.Core.Settings
 
         [SettingPropertyButton("列出已复刻英雄（验证）", Content = "查看", Order = 2,
             HintText = "在游戏信息栏与日志中列出本模组复刻到当前世界的英雄及其存活/游荡状态，用于快速验证功能。")]
-        [SettingPropertyGroup("操作", GroupOrder = 2)]
+        [SettingPropertyGroup("操作", GroupOrder = 3)]
         public Action ListResurrectedButton
         {
             get => _listResurrectedAction;
@@ -104,6 +125,10 @@ namespace LegacyWorld.Core.Settings
             Enabled = data.Enabled;
             AutoExportOnSave = data.AutoExportOnSave;
             LogEnabled = data.LogEnabled;
+            RespectAdvancedStartOptions = data.RespectAdvancedStartOptions;
+            AdvancedStartSkipKingdomRulers = data.AdvancedStartSkipKingdomRulers;
+            AdvancedStartSkipClanKingdoms = data.AdvancedStartSkipClanKingdoms;
+            AdvancedStartSkipSettlementOwners = data.AdvancedStartSkipSettlementOwners;
             RestoreKingdoms = data.RestoreKingdoms;
             RestoreClans = data.RestoreClans;
             RestoreSettlements = data.RestoreSettlements;

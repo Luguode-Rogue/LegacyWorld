@@ -28,7 +28,7 @@ namespace LegacyWorld.Core.Import
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(ss.OwnerClanId))
+                if (settings.RestoreSettlementOwnership && !string.IsNullOrEmpty(ss.OwnerClanId))
                 {
                     var newOwner = adapter.FindClan(ss.OwnerClanId);
 

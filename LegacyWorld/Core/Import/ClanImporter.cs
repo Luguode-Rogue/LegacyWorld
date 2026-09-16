@@ -34,7 +34,7 @@ namespace LegacyWorld.Core.Import
                 // 边界：家族已解体（Eliminated），仅恢复其经济/归属引用意义不大且可能异常，跳过。
                 if (clan.IsDestroyed) { AffixLogger.Warn("CLANIMP", $"家族 {cs.Name} 已解体，跳过恢复"); continue; }
 
-                if (!string.IsNullOrEmpty(cs.KingdomId))
+                if (settings.RestoreClanKingdomMembership && !string.IsNullOrEmpty(cs.KingdomId))
                 {
                     var kingdom = adapter.FindKingdom(cs.KingdomId);
                     if (kingdom != null) adapter.SetClanKingdom(clan, kingdom);

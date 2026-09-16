@@ -65,6 +65,10 @@ namespace LegacyWorld.Core.Settings
             Settings.Enabled = mcm.Enabled;
             Settings.AutoExportOnSave = mcm.AutoExportOnSave;
             Settings.LogEnabled = mcm.LogEnabled;
+            Settings.RespectAdvancedStartOptions = mcm.RespectAdvancedStartOptions;
+            Settings.AdvancedStartSkipKingdomRulers = mcm.AdvancedStartSkipKingdomRulers;
+            Settings.AdvancedStartSkipClanKingdoms = mcm.AdvancedStartSkipClanKingdoms;
+            Settings.AdvancedStartSkipSettlementOwners = mcm.AdvancedStartSkipSettlementOwners;
             Settings.RestoreKingdoms = mcm.RestoreKingdoms;
             Settings.RestoreClans = mcm.RestoreClans;
             Settings.RestoreSettlements = mcm.RestoreSettlements;
@@ -79,7 +83,9 @@ namespace LegacyWorld.Core.Settings
         {
             RestoreKingdoms = Settings.RestoreKingdoms,
             RestoreClans = Settings.RestoreClans,
+            RestoreClanKingdomMembership = true,
             RestoreSettlements = Settings.RestoreSettlements,
+            RestoreSettlementOwnership = true,
             RestoreClanEconomy = Settings.RestoreClanEconomy,
             CreateMissingClans = Settings.CreateMissingClans,
             RestoreHeroes = Settings.RestoreHeroes
