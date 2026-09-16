@@ -23,6 +23,7 @@ namespace LegacyWorld.Bannerlord
     public static class LegacyService
     {
         private static IGameAdapter _adapter;
+        private static string _pendingCompatibilityNotice;
 
         // 已复刻过的遗产世界持久化在 LegacyHeroes.json 的 AppliedWorldIds 中（跨进程生效），
         // 不再使用纯内存集合，避免重开游戏后重复添加遗留 NPC。
@@ -134,6 +135,17 @@ namespace LegacyWorld.Bannerlord
                     SaveAppliedWorlds(heroes, foreignWorlds, legacyData.WorldId);
             }
             catch (Exception ex) { AffixLogger.Error("SERVICE", "强制导入失败", ex); }
+        }
+
+        /// <summary>
+        /// 取出一次待显示的高级开局兼容提示。
+        /// 导入发生在新游戏加载阶段，实际弹窗延后到地图状态激活后由 LegacyBehavior 展示。
+        /// </summary>
+        internal static string ConsumePendingCompatibilityNotice()
+        {
+            string notice = _pendingCompatibilityNotice;
+            _pendingCompatibilityNotice = null;
+            return notice;
         }
 
         public static string GetCurrentWorldId() => _adapter?.GetWorldId() ?? "unknown";
@@ -263,9 +275,15 @@ namespace LegacyWorld.Bannerlord
                 if (hasWorldScenario) source.Add($"场景={scenario}");
                 if (hasPoliticalStartType) source.Add($"身份={startType}");
 
-                string message = $"[LegacyWorld] 检测到高级开局（{string.Join("，", source)}），以游戏开局选项为准。本次不导入：{string.Join("、", skipped)}。可在 MCM「高级开局兼容」中调整。";
-                AffixLogger.Warn("COMPAT", message);
-                InformationManager.DisplayMessage(new InformationMessage(message, Colors.Yellow));
+                string message =
+                    $"检测到高级开局（{string.Join("，", source)}）。\n\n" +
+                    "LegacyWorld 将以游戏开局选项为准，本次不会覆盖：\n" +
+                    $"• {string.Join("\n• ", skipped)}\n\n" +
+                    "其它已启用的非冲突导入项目仍会正常执行。\n" +
+                    "可在 MCM「高级开局兼容」中单独调整这些跳过项。";
+
+                _pendingCompatibilityNotice = message;
+                AffixLogger.Warn("COMPAT", message.Replace("\n", " | "));
             }
 
             return importSettings;

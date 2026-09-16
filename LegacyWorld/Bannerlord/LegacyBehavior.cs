@@ -1,6 +1,7 @@
 using System;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.MapEvents;
+using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.Core;
 using TaleWorlds.Localization;
 using TaleWorlds.SaveSystem;
@@ -26,6 +27,7 @@ namespace LegacyWorld.Bannerlord
             // 1.5 高级开局世界场景在 OnNewGameCreatedEvent 中重构王国/领地。
             // LegacyWorld 必须等待所有新游戏 FollowUp 完成后再导入，避免提前制造叛军 Clan 等状态污染原版场景处理。
             CampaignEvents.OnNewGameCreatedPartialFollowUpEndEvent.AddNonSerializedListener(this, OnNewGameCreated);
+            CampaignEvents.TickEvent.AddNonSerializedListener(this, OnCampaignTick);
             CampaignEvents.HourlyTickEvent.AddNonSerializedListener(this, OnTick);
 
             // 注入手动按钮的执行体，使 MCM 点击即时生效（无需等待 HourlyTick）
@@ -209,6 +211,33 @@ namespace LegacyWorld.Bannerlord
                 AffixLogger.Warn("BEHAVIOR", $"读取持久化复刻记录失败: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 高级开局兼容提示必须等地图状态真正激活后再显示。
+        /// 原版 GauntletQueryManager 使用 InformationManager.ShowInquiry 渲染 SingleQueryPopup。
+        /// </summary>
+        private void OnCampaignTick(float dt)
+        {
+            if (!(GameStateManager.Current?.ActiveState is MapState))
+                return;
+
+            string notice = LegacyService.ConsumePendingCompatibilityNotice();
+            if (string.IsNullOrEmpty(notice))
+                return;
+
+            InformationManager.ShowInquiry(
+                new InquiryData(
+                    "LegacyWorld - 高级开局兼容",
+                    notice,
+                    true,
+                    false,
+                    "确定",
+                    string.Empty,
+                    null,
+                    null),
+                pauseGameActiveState: false,
+                prioritize: true);
         }
 
         // 兜底：若 runner 未被注入（极少见），仍由 HourlyTick 消费标志执行
