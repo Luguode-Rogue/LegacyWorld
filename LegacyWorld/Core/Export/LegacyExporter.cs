@@ -83,7 +83,8 @@ namespace LegacyWorld.Core.Export
 
         /// <summary>
         /// 导出当前存档的玩家人物（player/companion/wanderer）到 LegacyHeroes.json，累积写。
-        /// 每次导出把当前存档模板追加进去，按 (WorldId+Name+Source) 去重，因此不会覆盖旧世界的遗留人物。
+        /// 不同世界的模板继续累积保留；同一世界同一人物则用当前最新快照替换旧快照，
+        /// 这样等级、技能以及玩家装备变化会在后续导出时得到刷新，同时不会产生重复记录。
         /// 例：B 世界导出会保留 A 的遗留；C 世界导入时可同时拿到 A 与 B 的遗留玩家人物。
         /// </summary>
         public static HeroProfileList ExportHeroes(IGameAdapter adapter)
@@ -91,25 +92,37 @@ namespace LegacyWorld.Core.Export
             AffixLogger.Info("EXPORT", "导出玩家人物遗产开始");
             string currentWorldId = adapter.GetWorldId();
 
-            // 基于已加载的列表追加（保留已持久化的 AppliedWorldIds），而非新建导致丢失
+            // 基于已加载的列表更新（保留已持久化的 AppliedWorldIds / ResurrectedHeroes），
+            // 而不是每次新建；同一来源人物使用当前快照替换，避免装备/属性永远停留在首次导出状态。
             var list = LoadHeroes() ?? new HeroProfileList();
             if (list.Profiles == null) list.Profiles = new List<HeroProfile>();
             if (list.AppliedWorldIds == null) list.AppliedWorldIds = new List<string>();
+            if (list.ResurrectedHeroes == null) list.ResurrectedHeroes = new List<ResurrectedHeroRecord>();
 
-            int added = 0, dup = 0;
+            int added = 0, updated = 0;
             foreach (var hero in adapter.GetHeroProfiles())
             {
                 if (hero == null) continue;
-                if (list.Profiles.Any(p => p != null && p.WorldId == hero.WorldId && p.Name == hero.Name && p.Source == hero.Source))
+
+                int existingIndex = list.Profiles.FindIndex(p =>
+                    p != null &&
+                    p.WorldId == hero.WorldId &&
+                    p.Name == hero.Name &&
+                    p.Source == hero.Source);
+
+                if (existingIndex >= 0)
                 {
-                    dup++; // 同一存档同一人物已存在，跳过（避免重复累积）
-                    continue;
+                    list.Profiles[existingIndex] = hero;
+                    updated++;
                 }
-                list.Profiles.Add(hero);
-                added++;
+                else
+                {
+                    list.Profiles.Add(hero);
+                    added++;
+                }
             }
 
-            AffixLogger.Info("EXPORT", $"玩家人物遗产导出完成: 新增 {added} 个 / 重复跳过 {dup} 个 / 累计 {list.Profiles.Count} 个（当前世界={currentWorldId}）");
+            AffixLogger.Info("EXPORT", $"玩家人物遗产导出完成: 新增 {added} 个 / 刷新 {updated} 个 / 累计 {list.Profiles.Count} 个（当前世界={currentWorldId}）");
             return list;
         }
 
