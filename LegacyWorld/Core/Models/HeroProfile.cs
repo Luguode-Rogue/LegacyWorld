@@ -51,6 +51,11 @@ namespace LegacyWorld.Core.Models
         /// <summary>特性值：特性 StringId -> 等级。</summary>
         public Dictionary<string, int> Traits { get; set; } = new Dictionary<string, int>();
 
+        /// <summary>
+        /// 是否包含完整装备快照。用于区分"旧版本档案没有装备字段"和"玩家确实裸装"两种情况。
+        /// </summary>
+        public bool HasEquipmentSnapshot { get; set; }
+
         /// <summary>玩家本体的战斗装备。旧档案缺少此字段时按空列表处理。</summary>
         public List<EquipmentSlotProfile> BattleEquipment { get; set; } = new List<EquipmentSlotProfile>();
 
