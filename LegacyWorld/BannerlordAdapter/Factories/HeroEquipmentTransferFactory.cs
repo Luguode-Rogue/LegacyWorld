@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using LegacyWorld.Core.Models;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.CampaignBehaviors;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
@@ -17,6 +19,14 @@ namespace LegacyWorld.BannerlordAdapter.Factories
     {
         private const int CraftedPieceTypeCount = 4;
         private const string PlayerSource = "player";
+
+        private static readonly MethodInfo CraftingBehaviorOnNewItemCrafted =
+            typeof(CraftingCampaignBehavior).GetMethod(
+                "OnNewItemCrafted",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(ItemObject), typeof(ItemModifier), typeof(bool) },
+                modifiers: null);
 
         public static void Capture(Hero hero, HeroProfile profile)
         {
@@ -38,7 +48,7 @@ namespace LegacyWorld.BannerlordAdapter.Factories
                 return;
 
             // 同一把玩家锻造武器可能同时出现在战斗/便装装备里。跨两个装备集共用缓存，
-            // 避免重复生成两个运行时 ItemObject，也避免重复触发原版锻造持久化事件。
+            // 避免重复生成两个运行时 ItemObject，也避免重复登记到原版锻造持久化字典。
             var rebuiltCraftedItems = new Dictionary<string, ItemObject>(StringComparer.Ordinal);
             RestoreEquipment(hero, hero.BattleEquipment, profile.BattleEquipment, "战斗", rebuiltCraftedItems);
             RestoreEquipment(hero, hero.CivilianEquipment, profile.CivilianEquipment, "便装", rebuiltCraftedItems);
@@ -227,16 +237,41 @@ namespace LegacyWorld.BannerlordAdapter.Factories
                 return null;
             }
 
-            // 标记为玩家锻造，并注册为真正的运行时 MBObject；随后通知原版 CraftingCampaignBehavior，
-            // 让它把设计数据写进自己的持久化字典，确保后续保存/读档仍可重建该武器。
+            // 与原版锻造顺序一致：标记玩家锻造 -> 注册 MBObject -> 登记到 CraftingCampaignBehavior。
+            // 这里不能广播 CampaignEventDispatcher.OnNewItemCrafted：该全局事件还会被统计、成就和任务监听，
+            // 遗产武器只是重建旧物品，不应被计作当前世界新锻造的一把武器。
             ItemObject.InitAsPlayerCraftedItem(ref craftedItem);
             craftedItem = MBObjectManager.Instance.RegisterObject(craftedItem);
 
             ItemModifier modifier = FindObject<ItemModifier>(itemModifierId);
-            CampaignEventDispatcher.Instance?.OnNewItemCrafted(craftedItem, modifier, false);
+            if (!RegisterCraftedItemForPersistence(craftedItem, modifier))
+            {
+                Debug.Print($"[LegacyWorld] 锻造武器已重建但持久化登记失败: {saved.WeaponName} ({craftedItem.StringId})");
+            }
 
             Debug.Print($"[LegacyWorld] 已重建锻造武器: {saved.WeaponName} -> {craftedItem.StringId}");
             return craftedItem;
+        }
+
+        private static bool RegisterCraftedItemForPersistence(ItemObject craftedItem, ItemModifier modifier)
+        {
+            if (craftedItem == null || Campaign.Current == null || CraftingBehaviorOnNewItemCrafted == null)
+                return false;
+
+            try
+            {
+                CraftingCampaignBehavior behavior = Campaign.Current.GetCampaignBehavior<CraftingCampaignBehavior>();
+                if (behavior == null)
+                    return false;
+
+                CraftingBehaviorOnNewItemCrafted.Invoke(behavior, new object[] { craftedItem, modifier, false });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.Print($"[LegacyWorld] 登记锻造武器持久化失败: {ex.GetBaseException().Message}");
+                return false;
+            }
         }
 
         private static T FindObject<T>(string stringId) where T : MBObjectBase
