@@ -26,7 +26,7 @@ namespace LegacyWorld.BannerlordAdapter.Factories
 
             profile.HasEquipmentSnapshot = true;
             profile.BattleEquipment = CaptureEquipment(hero.BattleEquipment, "战斗");
-            profile.CivilianEquipment = CaptureEquipment(hero.FirstCivilianEquipment, "便装");
+            profile.CivilianEquipment = CaptureEquipment(hero.CivilianEquipment, "便装");
 
             Debug.Print($"[LegacyWorld] 已记录玩家装备: battle={profile.BattleEquipment.Count}, civilian={profile.CivilianEquipment.Count}");
         }
@@ -38,7 +38,7 @@ namespace LegacyWorld.BannerlordAdapter.Factories
                 return;
 
             RestoreEquipment(hero, hero.BattleEquipment, profile.BattleEquipment, "战斗");
-            RestoreEquipment(hero, hero.FirstCivilianEquipment, profile.CivilianEquipment, "便装");
+            RestoreEquipment(hero, hero.CivilianEquipment, profile.CivilianEquipment, "便装");
         }
 
         private static List<EquipmentSlotProfile> CaptureEquipment(Equipment equipment, string setName)
