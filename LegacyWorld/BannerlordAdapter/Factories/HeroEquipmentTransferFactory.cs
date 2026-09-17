@@ -37,8 +37,11 @@ namespace LegacyWorld.BannerlordAdapter.Factories
                 !string.Equals(profile.Source, PlayerSource, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            RestoreEquipment(hero, hero.BattleEquipment, profile.BattleEquipment, "战斗");
-            RestoreEquipment(hero, hero.CivilianEquipment, profile.CivilianEquipment, "便装");
+            // 同一把玩家锻造武器可能同时出现在战斗/便装装备里。跨两个装备集共用缓存，
+            // 避免重复生成两个运行时 ItemObject，也避免重复触发原版锻造持久化事件。
+            var rebuiltCraftedItems = new Dictionary<string, ItemObject>(StringComparer.Ordinal);
+            RestoreEquipment(hero, hero.BattleEquipment, profile.BattleEquipment, "战斗", rebuiltCraftedItems);
+            RestoreEquipment(hero, hero.CivilianEquipment, profile.CivilianEquipment, "便装", rebuiltCraftedItems);
         }
 
         private static List<EquipmentSlotProfile> CaptureEquipment(Equipment equipment, string setName)
@@ -107,7 +110,12 @@ namespace LegacyWorld.BannerlordAdapter.Factories
             return crafted;
         }
 
-        private static void RestoreEquipment(Hero hero, Equipment target, List<EquipmentSlotProfile> saved, string setName)
+        private static void RestoreEquipment(
+            Hero hero,
+            Equipment target,
+            List<EquipmentSlotProfile> saved,
+            string setName,
+            Dictionary<string, ItemObject> rebuiltCraftedItems)
         {
             if (target == null)
                 return;
@@ -126,9 +134,25 @@ namespace LegacyWorld.BannerlordAdapter.Factories
 
                 try
                 {
-                    ItemObject item = slot.CraftedItem != null
-                        ? RebuildCraftedItem(hero, slot.CraftedItem, slot.ItemModifierId)
-                        : FindObject<ItemObject>(slot.ItemId);
+                    ItemObject item;
+                    if (slot.CraftedItem != null)
+                    {
+                        string cacheKey = string.IsNullOrWhiteSpace(slot.ItemId) ? null : slot.ItemId;
+                        if (cacheKey != null && rebuiltCraftedItems.TryGetValue(cacheKey, out ItemObject cachedItem))
+                        {
+                            item = cachedItem;
+                        }
+                        else
+                        {
+                            item = RebuildCraftedItem(hero, slot.CraftedItem, slot.ItemModifierId);
+                            if (item != null && cacheKey != null)
+                                rebuiltCraftedItems[cacheKey] = item;
+                        }
+                    }
+                    else
+                    {
+                        item = FindObject<ItemObject>(slot.ItemId);
+                    }
 
                     if (item == null)
                     {
