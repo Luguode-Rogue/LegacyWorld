@@ -16,26 +16,29 @@ namespace LegacyWorld.BannerlordAdapter.Factories
     internal static class HeroEquipmentTransferFactory
     {
         private const int CraftedPieceTypeCount = 4;
+        private const string PlayerSource = "player";
 
         public static void Capture(Hero hero, HeroProfile profile)
         {
-            if (hero?.CharacterObject == null || profile == null)
+            if (hero == null || profile == null ||
+                !string.Equals(profile.Source, PlayerSource, StringComparison.OrdinalIgnoreCase))
                 return;
 
             profile.HasEquipmentSnapshot = true;
-            profile.BattleEquipment = CaptureEquipment(hero.CharacterObject.Equipment, "战斗");
-            profile.CivilianEquipment = CaptureEquipment(hero.CharacterObject.FirstCivilianEquipment, "便装");
+            profile.BattleEquipment = CaptureEquipment(hero.BattleEquipment, "战斗");
+            profile.CivilianEquipment = CaptureEquipment(hero.FirstCivilianEquipment, "便装");
 
             Debug.Print($"[LegacyWorld] 已记录玩家装备: battle={profile.BattleEquipment.Count}, civilian={profile.CivilianEquipment.Count}");
         }
 
         public static void Restore(Hero hero, HeroProfile profile)
         {
-            if (hero?.CharacterObject == null || profile == null || !profile.HasEquipmentSnapshot)
+            if (hero == null || profile == null || !profile.HasEquipmentSnapshot ||
+                !string.Equals(profile.Source, PlayerSource, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            RestoreEquipment(hero, hero.CharacterObject.Equipment, profile.BattleEquipment, "战斗");
-            RestoreEquipment(hero, hero.CharacterObject.FirstCivilianEquipment, profile.CivilianEquipment, "便装");
+            RestoreEquipment(hero, hero.BattleEquipment, profile.BattleEquipment, "战斗");
+            RestoreEquipment(hero, hero.FirstCivilianEquipment, profile.CivilianEquipment, "便装");
         }
 
         private static List<EquipmentSlotProfile> CaptureEquipment(Equipment equipment, string setName)
@@ -111,7 +114,7 @@ namespace LegacyWorld.BannerlordAdapter.Factories
 
             // 新建的 wanderer 自带模板装备。既然存在装备快照，先完全清空，避免模板装备混入招募估价。
             for (int i = (int)EquipmentIndex.WeaponItemBeginSlot; i < (int)EquipmentIndex.NumEquipmentSetSlots; i++)
-                target[(EquipmentIndex)i] = default(EquipmentElement);
+                target[(EquipmentIndex)i] = EquipmentElement.Invalid;
 
             if (saved == null)
                 return;
@@ -192,7 +195,8 @@ namespace LegacyWorld.BannerlordAdapter.Factories
             var design = new WeaponDesign(template, weaponName, pieces, customId);
 
             ItemObject craftedItem = null;
-            Crafting.GenerateItem(design, weaponName, hero?.Culture, template.ItemModifierGroup, ref craftedItem, customId);
+            CultureObject itemCulture = FindObject<CultureObject>(saved.CultureId) ?? hero?.Culture;
+            Crafting.GenerateItem(design, weaponName, itemCulture, template.ItemModifierGroup, ref craftedItem, customId);
             if (craftedItem == null)
             {
                 Debug.Print($"[LegacyWorld] 锻造武器恢复失败: Crafting.GenerateItem 返回空 ({saved.WeaponName})");
