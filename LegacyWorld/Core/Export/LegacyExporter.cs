@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using LegacyWorld.Adapter;
 using LegacyWorld.Core;
 using LegacyWorld.Core.Models;
@@ -99,6 +98,11 @@ namespace LegacyWorld.Core.Export
             if (list.AppliedWorldIds == null) list.AppliedWorldIds = new List<string>();
             if (list.ResurrectedHeroes == null) list.ResurrectedHeroes = new List<ResurrectedHeroRecord>();
 
+            // 旧版本或多轮开发期间可能已经把同一 WorldId + Name + Source 写入多次。
+            // 在合并当前快照前先做一次全表归一化，并保留最后一条（通常也是较新的记录），
+            // 避免“现在不再新增重复，但历史重复永久残留”的半修复状态。
+            int removedDuplicates = NormalizeHeroProfiles(list.Profiles);
+
             int added = 0, updated = 0;
             foreach (var hero in adapter.GetHeroProfiles())
             {
@@ -122,8 +126,46 @@ namespace LegacyWorld.Core.Export
                 }
             }
 
-            AffixLogger.Info("EXPORT", $"玩家人物遗产导出完成: 新增 {added} 个 / 刷新 {updated} 个 / 累计 {list.Profiles.Count} 个（当前世界={currentWorldId}）");
+            AffixLogger.Info("EXPORT", $"玩家人物遗产导出完成: 新增 {added} 个 / 刷新 {updated} 个 / 清理历史重复 {removedDuplicates} 个 / 累计 {list.Profiles.Count} 个（当前世界={currentWorldId}）");
             return list;
+        }
+
+        private static int NormalizeHeroProfiles(List<HeroProfile> profiles)
+        {
+            if (profiles == null || profiles.Count == 0)
+                return 0;
+
+            int removed = 0;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            // 倒序遍历，使同键多条记录保留最后一条。
+            for (int i = profiles.Count - 1; i >= 0; i--)
+            {
+                HeroProfile profile = profiles[i];
+                if (profile == null)
+                {
+                    profiles.RemoveAt(i);
+                    removed++;
+                    continue;
+                }
+
+                string key = BuildHeroProfileKey(profile);
+                if (!seen.Add(key))
+                {
+                    profiles.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            return removed;
+        }
+
+        private static string BuildHeroProfileKey(HeroProfile profile)
+        {
+            const string separator = "\u001F";
+            return (profile?.WorldId ?? string.Empty) + separator
+                 + (profile?.Name ?? string.Empty) + separator
+                 + (profile?.Source ?? string.Empty);
         }
 
         /// <summary>
