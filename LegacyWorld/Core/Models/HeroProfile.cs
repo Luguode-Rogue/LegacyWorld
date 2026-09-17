@@ -6,7 +6,8 @@ namespace LegacyWorld.Core.Models
     /// 英雄模板档案（A 方案：英雄模板复刻）。
     /// 记录玩家本体（Hero.MainHero）以及玩家招募过且仍然存活的非固定名 NPC，
     /// 以便在新游戏中以"游荡英雄"的形式复刻出来（遇到原来的自己/伙伴的效果）。
-    /// 仅记录外貌、姓名、文化、技能、特性等模板数据，不迁移身份/阵营等运行时状态。
+    /// 记录外貌、姓名、文化、技能、特性等模板数据；玩家本体额外记录战斗/便装装备，
+    /// 但不迁移身份、阵营等运行时状态。
     /// </summary>
     public class HeroProfile
     {
@@ -49,5 +50,11 @@ namespace LegacyWorld.Core.Models
 
         /// <summary>特性值：特性 StringId -> 等级。</summary>
         public Dictionary<string, int> Traits { get; set; } = new Dictionary<string, int>();
+
+        /// <summary>玩家本体的战斗装备。旧档案缺少此字段时按空列表处理。</summary>
+        public List<EquipmentSlotProfile> BattleEquipment { get; set; } = new List<EquipmentSlotProfile>();
+
+        /// <summary>玩家本体的第一套便装。旧档案缺少此字段时按空列表处理。</summary>
+        public List<EquipmentSlotProfile> CivilianEquipment { get; set; } = new List<EquipmentSlotProfile>();
     }
 }
