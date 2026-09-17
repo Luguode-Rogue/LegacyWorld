@@ -5,7 +5,7 @@ namespace LegacyWorld.Core.Models
     /// <summary>
     /// 英雄模板档案（A 方案：英雄模板复刻）。
     /// 记录玩家本体（Hero.MainHero）以及玩家招募过且仍然存活的非固定名 NPC，
-    /// 以便在新游戏中以"游荡英雄"的形式复刻出来（遇到原来的自己/伙伴的效果）。
+    /// 以便在新游戏中以“游荡英雄”的形式复刻出来（遇到原来的自己/伙伴的效果）。
     /// 记录外貌、姓名、文化、技能、特性等模板数据；玩家本体额外记录战斗/便装装备，
     /// 但不迁移身份、阵营等运行时状态。
     /// </summary>
@@ -14,9 +14,15 @@ namespace LegacyWorld.Core.Models
         /// <summary>模板来源：player=玩家本体，companion=玩家招募过的 NPC。</summary>
         public string Source { get; set; }
 
-        /// <summary>模板来源存档的世界 Id（Campaign.UniqueGameId）。
-        /// 用于区分"同一存档"与"跨存档"：防二重身仅在当前 WorldId 与该值相等时生效。</summary>
+        /// <summary>模板来源存档的世界 Id（Campaign.UniqueGameId）。</summary>
         public string WorldId { get; set; }
+
+        /// <summary>
+        /// 跨导出稳定身份。新档案使用 WorldId + Source + 原 Hero.StringId 组成，
+        /// 用于在同一世界中即使英雄改名也能刷新原档案，并避免跨世界同名英雄互相误判。
+        /// 旧版本档案没有此字段时继续回退到 WorldId + Name + Source。
+        /// </summary>
+        public string LegacyId { get; set; }
 
         /// <summary>完整姓名。</summary>
         public string Name { get; set; }
@@ -52,7 +58,7 @@ namespace LegacyWorld.Core.Models
         public Dictionary<string, int> Traits { get; set; } = new Dictionary<string, int>();
 
         /// <summary>
-        /// 是否包含完整装备快照。用于区分"旧版本档案没有装备字段"和"玩家确实裸装"两种情况。
+        /// 是否包含完整装备快照。用于区分“旧版本档案没有装备字段”和“玩家确实裸装”两种情况。
         /// </summary>
         public bool HasEquipmentSnapshot { get; set; }
 

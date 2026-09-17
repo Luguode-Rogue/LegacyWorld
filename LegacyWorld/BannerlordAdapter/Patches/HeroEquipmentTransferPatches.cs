@@ -10,36 +10,49 @@ using TaleWorlds.Library;
 namespace LegacyWorld.BannerlordAdapter.Patches
 {
     /// <summary>
-    /// 把玩家装备迁移接入现有英雄导出/复活流程，而不改动原有流程本身。
-    /// SubModule 已统一调用 Harmony.PatchAll()，因此无需额外注册。
+    /// BuildHeroProfile 的统一补充：所有人物写入稳定 LegacyId；玩家本体额外抓取装备快照。
     /// </summary>
     [HarmonyPatch(typeof(BannerlordGameAdapter), "BuildHeroProfile")]
-    internal static class PlayerEquipmentCapturePatch
+    internal static class HeroProfileCapturePatch
     {
+        private const string Separator = "\u001F";
+
         private static void Postfix(Hero hero, string source, HeroProfile __result)
         {
-            if (hero == null || __result == null ||
-                !string.Equals(source, "player", StringComparison.OrdinalIgnoreCase))
+            if (hero == null || __result == null)
                 return;
 
             try
             {
+                if (string.IsNullOrWhiteSpace(__result.LegacyId) && !string.IsNullOrWhiteSpace(hero.StringId))
+                {
+                    string worldId = string.IsNullOrWhiteSpace(__result.WorldId)
+                        ? Campaign.Current?.UniqueGameId ?? "0"
+                        : __result.WorldId;
+                    __result.LegacyId = worldId + Separator + (source ?? string.Empty) + Separator + hero.StringId;
+                }
+
+                if (!string.Equals(source, "player", StringComparison.OrdinalIgnoreCase))
+                    return;
+
                 HeroEquipmentTransferFactory.Capture(hero, __result);
             }
             catch (Exception ex)
             {
-                // 装备快照失败不能阻断整个遗产导出。
-                __result.HasEquipmentSnapshot = false;
-                __result.BattleEquipment?.Clear();
-                __result.CivilianEquipment?.Clear();
-                Debug.Print($"[LegacyWorld] 玩家装备记录失败，继续导出其它英雄数据: {ex.Message}");
+                // 稳定身份失败不阻断普通英雄数据；装备失败时仅关闭装备快照。
+                if (string.Equals(source, "player", StringComparison.OrdinalIgnoreCase))
+                {
+                    __result.HasEquipmentSnapshot = false;
+                    __result.BattleEquipment?.Clear();
+                    __result.CivilianEquipment?.Clear();
+                }
+                Debug.Print($"[LegacyWorld] 英雄档案补充失败，继续导出其它数据: {ex.Message}");
             }
         }
     }
 
     /// <summary>
-    /// 复活流程是 void 且内部创建 Hero。Prefix 先记录当前所有存活英雄，Postfix 只查找
-    /// 本次调用新创建出来的同名玩家遗产英雄，因此同档防二重身/重复导入命中时不会误换装。
+    /// 复活流程是 void 且内部创建 Hero。Prefix 记录复活前对象，Postfix 只对本次新建的玩家遗产英雄恢复装备。
     /// </summary>
     [HarmonyPatch(typeof(HeroResurrectionFactory), nameof(HeroResurrectionFactory.Resurrect))]
     internal static class PlayerEquipmentRestorePatch
@@ -102,7 +115,6 @@ namespace LegacyWorld.BannerlordAdapter.Patches
             }
             catch (Exception ex)
             {
-                // 装备缺失/旧 Mod 缺失不应让英雄复活整体失败。
                 Debug.Print($"[LegacyWorld] 玩家装备恢复失败但保留复活英雄: {profile?.Name}, error={ex.Message}");
             }
         }

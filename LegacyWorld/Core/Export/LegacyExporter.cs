@@ -8,16 +8,9 @@ using LegacyWorld.Core.Storage;
 
 namespace LegacyWorld.Core.Export
 {
-    /// <summary>
-    /// 世界状态导出器。遍历所有 Kingdom / Clan / Settlement 并组装为 LegacyData。
-    /// 业务逻辑层，不依赖 TaleWorlds.*。
-    /// </summary>
+    /// <summary>世界状态与人物遗产导出器。</summary>
     public static class LegacyExporter
     {
-        /// <summary>
-        /// 导出世界状态（王国/家族/定居点）到 Legacy.json，覆盖写（仅反映当前存档最新状态）。
-        /// 玩家人物遗产由 <see cref="ExportHeroes"/> 单独累积写入 LegacyHeroes.json。
-        /// </summary>
         public static LegacyData ExportWorld(IGameAdapter adapter)
         {
             AffixLogger.Info("EXPORT", "导出世界状态开始");
@@ -81,39 +74,27 @@ namespace LegacyWorld.Core.Export
         }
 
         /// <summary>
-        /// 导出当前存档的玩家人物（player/companion/wanderer）到 LegacyHeroes.json，累积写。
-        /// 不同世界的模板继续累积保留；同一世界同一人物则用当前最新快照替换旧快照，
-        /// 这样等级、技能以及玩家装备变化会在后续导出时得到刷新，同时不会产生重复记录。
-        /// 例：B 世界导出会保留 A 的遗留；C 世界导入时可同时拿到 A 与 B 的遗留玩家人物。
+        /// 累积导出人物遗产。新档案优先使用 LegacyId；旧档案继续用 WorldId + Name + Source 兼容。
+        /// 同一英雄之后即使改名，也会用当前快照覆盖原档案。
         /// </summary>
         public static HeroProfileList ExportHeroes(IGameAdapter adapter)
         {
             AffixLogger.Info("EXPORT", "导出玩家人物遗产开始");
             string currentWorldId = adapter.GetWorldId();
 
-            // 基于已加载的列表更新（保留已持久化的 AppliedWorldIds / ResurrectedHeroes），
-            // 而不是每次新建；同一来源人物使用当前快照替换，避免装备/属性永远停留在首次导出状态。
             var list = LoadHeroes() ?? new HeroProfileList();
             if (list.Profiles == null) list.Profiles = new List<HeroProfile>();
             if (list.AppliedWorldIds == null) list.AppliedWorldIds = new List<string>();
             if (list.ResurrectedHeroes == null) list.ResurrectedHeroes = new List<ResurrectedHeroRecord>();
 
-            // 旧版本或多轮开发期间可能已经把同一 WorldId + Name + Source 写入多次。
-            // 在合并当前快照前先做一次全表归一化，并保留最后一条（通常也是较新的记录），
-            // 避免“现在不再新增重复，但历史重复永久残留”的半修复状态。
             int removedDuplicates = NormalizeHeroProfiles(list.Profiles);
-
             int added = 0, updated = 0;
+
             foreach (var hero in adapter.GetHeroProfiles())
             {
                 if (hero == null) continue;
 
-                int existingIndex = list.Profiles.FindIndex(p =>
-                    p != null &&
-                    p.WorldId == hero.WorldId &&
-                    p.Name == hero.Name &&
-                    p.Source == hero.Source);
-
+                int existingIndex = list.Profiles.FindIndex(p => SameHeroIdentity(p, hero));
                 if (existingIndex >= 0)
                 {
                     list.Profiles[existingIndex] = hero;
@@ -126,6 +107,9 @@ namespace LegacyWorld.Core.Export
                 }
             }
 
+            // 本轮更新后再归一化一次，可顺便迁移“旧无 LegacyId + 新有 LegacyId”的同名记录。
+            removedDuplicates += NormalizeHeroProfiles(list.Profiles);
+
             AffixLogger.Info("EXPORT", $"玩家人物遗产导出完成: 新增 {added} 个 / 刷新 {updated} 个 / 清理历史重复 {removedDuplicates} 个 / 累计 {list.Profiles.Count} 个（当前世界={currentWorldId}）");
             return list;
         }
@@ -136,9 +120,9 @@ namespace LegacyWorld.Core.Export
                 return 0;
 
             int removed = 0;
-            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var kept = new List<HeroProfile>();
 
-            // 倒序遍历，使同键多条记录保留最后一条。
+            // 倒序保留最新记录；SameHeroIdentity 同时兼容新旧身份格式。
             for (int i = profiles.Count - 1; i >= 0; i--)
             {
                 HeroProfile profile = profiles[i];
@@ -149,28 +133,44 @@ namespace LegacyWorld.Core.Export
                     continue;
                 }
 
-                string key = BuildHeroProfileKey(profile);
-                if (!seen.Add(key))
+                bool duplicate = false;
+                foreach (HeroProfile newer in kept)
+                {
+                    if (SameHeroIdentity(profile, newer))
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+
+                if (duplicate)
                 {
                     profiles.RemoveAt(i);
                     removed++;
+                }
+                else
+                {
+                    kept.Add(profile);
                 }
             }
 
             return removed;
         }
 
-        private static string BuildHeroProfileKey(HeroProfile profile)
+        private static bool SameHeroIdentity(HeroProfile left, HeroProfile right)
         {
-            const string separator = "\u001F";
-            return (profile?.WorldId ?? string.Empty) + separator
-                 + (profile?.Name ?? string.Empty) + separator
-                 + (profile?.Source ?? string.Empty);
+            if (left == null || right == null)
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(left.LegacyId) && !string.IsNullOrWhiteSpace(right.LegacyId))
+                return string.Equals(left.LegacyId, right.LegacyId, StringComparison.Ordinal);
+
+            // 旧档案兼容：至少有一侧没有 LegacyId 时使用旧键迁移。
+            return string.Equals(left.WorldId, right.WorldId, StringComparison.Ordinal)
+                && string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+                && string.Equals(left.Source, right.Source, StringComparison.Ordinal);
         }
 
-        /// <summary>
-        /// 读取已累积的玩家人物遗产文件。文件不存在或损坏返回 null。
-        /// </summary>
         private static HeroProfileList LoadHeroes()
         {
             try

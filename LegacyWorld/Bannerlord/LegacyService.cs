@@ -16,17 +16,11 @@ using TaleWorlds.Library;
 
 namespace LegacyWorld.Bannerlord
 {
-    /// <summary>
-    /// LegacyWorld 静态服务入口。
-    /// 聚合适配器、导出器和导入器，对 Bannerlord 层提供统一 API。
-    /// </summary>
+    /// <summary>LegacyWorld 静态服务入口。</summary>
     public static class LegacyService
     {
         private static IGameAdapter _adapter;
         private static string _pendingCompatibilityNotice;
-
-        // 已复刻过的遗产世界持久化在 LegacyHeroes.json 的 AppliedWorldIds 中（跨进程生效），
-        // 不再使用纯内存集合，避免重开游戏后重复添加遗留 NPC。
 
         public static void Initialize()
         {
@@ -34,113 +28,106 @@ namespace LegacyWorld.Bannerlord
             AffixLogger.Info("SERVICE", "LegacyService 初始化完成");
         }
 
-        public static void Export(bool force = false)
-        {
-            try
-            {
-                if (!_adapterIsReady()) return;
-                if (!LegacyWorldSettingsManager.Settings.Enabled) { AffixLogger.Info("SERVICE", "系统未启用，跳过导出"); return; }
-                if (!force && !LegacyWorldSettingsManager.Settings.AutoExportOnSave) { AffixLogger.Info("SERVICE", "自动导出已关闭，跳过"); return; }
-
-                AffixLogger.Info("SERVICE", "开始导出...");
-                // 世界状态覆盖写 Legacy.json
-                var legacyData = LegacyExporter.ExportWorld(_adapter);
-                string json = LegacySerializer.Serialize(legacyData);
-                LegacyStorage.Write(json);
-                // 玩家人物遗产累积写 LegacyHeroes.json
-                var heroList = LegacyExporter.ExportHeroes(_adapter);
-                string heroJson = LegacySerializer.SerializeHeroes(heroList);
-                LegacyStorage.WriteHeroes(heroJson);
-                AffixLogger.Info("SERVICE", $"导出完成: {legacyData.Kingdoms.Count} 王国, {legacyData.Clans.Count} 家族, {legacyData.Settlements.Count} 定居点 | 玩家人物遗产累计 {heroList.Profiles.Count} 个");
-                InformationManager.DisplayMessage(new InformationMessage(
-                    $"[LegacyWorld] 世界状态已导出\n{legacyData.Kingdoms.Count} 王国 / {legacyData.Clans.Count} 家族 / {legacyData.Settlements.Count} 定居点\n玩家人物遗产累计 {heroList.Profiles.Count} 个",
-                    Colors.Green));
-            }
-            catch (Exception ex) { AffixLogger.Error("SERVICE", "导出失败", ex); }
-        }
-
-        public static bool Import()
+        public static bool Export(bool force = false)
         {
             try
             {
                 if (!_adapterIsReady()) return false;
-                var (legacyData, heroes) = LoadCombined();
-                if (legacyData == null) return false;
-                string currentWorldId = _adapter.GetWorldId();
+                if (!LegacyWorldSettingsManager.Settings.Enabled) { AffixLogger.Info("SERVICE", "系统未启用，跳过导出"); return false; }
+                if (!force && !LegacyWorldSettingsManager.Settings.AutoExportOnSave) { AffixLogger.Info("SERVICE", "自动导出已关闭，跳过"); return false; }
 
-                var applied = new HashSet<string>(heroes?.AppliedWorldIds ?? new List<string>());
+                AffixLogger.Info("SERVICE", "开始导出...");
+                var legacyData = LegacyExporter.ExportWorld(_adapter);
+                var heroList = LegacyExporter.ExportHeroes(_adapter);
+                string json = LegacySerializer.Serialize(legacyData);
+                string heroJson = LegacySerializer.SerializeHeroes(heroList);
 
-                // 取英雄遗产中"非当前世界"的来源世界集合，作为去重依据
-                var foreignWorlds = new HashSet<string>();
-                if (heroes != null)
-                    foreach (var h in heroes.Profiles)
-                        if (h != null && h.WorldId != currentWorldId) foreignWorlds.Add(h.WorldId);
-
-                if (foreignWorlds.Count == 0)
+                if (!LegacyStorage.WriteSnapshot(json, heroJson))
                 {
-                    AffixLogger.Warn("SERVICE", $"遗产中无其它世界的玩家人物（当前世界={currentWorldId}），跳过英雄导入");
-                    // 仍允许世界状态恢复（若世界状态来自其它世界）
-                    if (legacyData.WorldId == currentWorldId)
-                    {
-                        AffixLogger.Warn("SERVICE", "世界状态也来自当前世界，整体跳过");
-                        return false;
-                    }
-                }
-                else
-                {
-                    // 若该批来源世界已复刻过（持久化记录），则跳过英雄复刻以避免重复
-                    bool alreadyApplied = foreignWorlds.Any(w => applied.Contains(w));
-                    if (alreadyApplied)
-                    {
-                        AffixLogger.Warn("SERVICE", $"这些遗产世界已导入过（{string.Join(",", foreignWorlds)}），跳过以避免重复复刻");
-                        if (legacyData.WorldId == currentWorldId) return false;
-                    }
+                    AffixLogger.Error("SERVICE", "导出失败：世界状态与人物遗产快照未能完整写入");
+                    InformationManager.DisplayMessage(new InformationMessage(
+                        "[LegacyWorld] 导出失败：数据文件写入失败，旧快照已尽量保留",
+                        Colors.Red));
+                    return false;
                 }
 
-                bool ok = ApplyImport(legacyData, heroes, foreignWorlds);
-                if (ok) SaveAppliedWorlds(heroes, foreignWorlds, legacyData.WorldId);
-                return ok;
+                AffixLogger.Info("SERVICE", $"导出完成: {legacyData.Kingdoms.Count} 王国, {legacyData.Clans.Count} 家族, {legacyData.Settlements.Count} 定居点 | 玩家人物遗产累计 {heroList.Profiles.Count} 个");
+                InformationManager.DisplayMessage(new InformationMessage(
+                    $"[LegacyWorld] 世界状态已导出\n{legacyData.Kingdoms.Count} 王国 / {legacyData.Clans.Count} 家族 / {legacyData.Settlements.Count} 定居点\n玩家人物遗产累计 {heroList.Profiles.Count} 个",
+                    Colors.Green));
+                return true;
             }
-            catch (Exception ex) { AffixLogger.Error("SERVICE", "导入失败", ex); return false; }
+            catch (Exception ex)
+            {
+                AffixLogger.Error("SERVICE", "导出失败", ex);
+                return false;
+            }
         }
 
-        public static void ForceImport()
+        public static LegacyOperationResult Import()
         {
             try
             {
-                if (!_adapterIsReady()) return;
+                if (!_adapterIsReady()) return LegacyOperationResult.Failed("战役或适配器未就绪");
                 var (legacyData, heroes) = LoadCombined();
-                if (legacyData == null) { AffixLogger.Warn("SERVICE", "强制导入：找不到 Legacy.json"); return; }
+                if (legacyData == null) return LegacyOperationResult.Skipped("没有可用的 Legacy.json");
                 string currentWorldId = _adapter.GetWorldId();
+
                 var applied = new HashSet<string>(heroes?.AppliedWorldIds ?? new List<string>());
-                var foreignWorlds = new HashSet<string>();
-                if (heroes != null)
-                    foreach (var h in heroes.Profiles)
-                        if (h != null && h.WorldId != currentWorldId) foreignWorlds.Add(h.WorldId);
+                var foreignWorlds = CollectForeignWorlds(legacyData, currentWorldId);
+
+                if (foreignWorlds.Count == 0 && legacyData.WorldId == currentWorldId)
+                {
+                    AffixLogger.Warn("SERVICE", "人物和世界状态都来自当前世界，整体跳过");
+                    return LegacyOperationResult.Skipped("遗产数据来自当前世界");
+                }
 
                 if (foreignWorlds.Count > 0 && foreignWorlds.Any(w => applied.Contains(w)))
                 {
-                    AffixLogger.Warn("SERVICE", $"这些遗产世界已导入过（{string.Join(",", foreignWorlds)}），强制导入跳过以避免重复复刻");
-                    return;
+                    AffixLogger.Info("SERVICE", "部分来源世界曾被应用过；自动新游戏导入仍按当前目标世界执行，具体重复由稳定身份和当前世界复刻记录处理");
                 }
-                // 边界修复（#1 手动应用重复创建）：即便遗产英雄都来自当前世界（foreignWorlds 为空），
-                // 只要本次世界状态来源 legacyData.WorldId 已应用过，再次点「立即应用」也会无脑重跑
-                // 定居点/家族恢复，造成重复创建（叛军/归属反复覆盖）。这里对状态世界也做去重。
-                if (!string.IsNullOrEmpty(legacyData.WorldId) && applied.Contains(legacyData.WorldId))
-                {
-                    AffixLogger.Warn("SERVICE", $"世界状态来源 {legacyData.WorldId} 已导入过，强制导入跳过以避免重复创建");
-                    return;
-                }
-                if (ApplyImport(legacyData, heroes, foreignWorlds))
-                    SaveAppliedWorlds(heroes, foreignWorlds, legacyData.WorldId);
+
+                return ExecuteImport(legacyData, heroes, foreignWorlds);
             }
-            catch (Exception ex) { AffixLogger.Error("SERVICE", "强制导入失败", ex); }
+            catch (Exception ex)
+            {
+                AffixLogger.Error("SERVICE", "导入失败", ex);
+                return LegacyOperationResult.Failed(ex.Message);
+            }
         }
 
-        /// <summary>
-        /// 取出一次待显示的高级开局兼容提示。
-        /// 导入发生在新游戏加载阶段，实际弹窗延后到地图状态激活后由 LegacyBehavior 展示。
-        /// </summary>
+        /// <summary>手动应用。返回真实 Applied / Partial / Skipped / Failed 状态。</summary>
+        public static LegacyOperationResult ForceImport()
+        {
+            try
+            {
+                if (!_adapterIsReady()) return LegacyOperationResult.Failed("战役或适配器未就绪");
+                var (legacyData, heroes) = LoadCombined();
+                if (legacyData == null) return LegacyOperationResult.Skipped("找不到 Legacy.json");
+                string currentWorldId = _adapter.GetWorldId();
+                var applied = new HashSet<string>(heroes?.AppliedWorldIds ?? new List<string>());
+                var foreignWorlds = CollectForeignWorlds(legacyData, currentWorldId);
+
+                if (foreignWorlds.Count > 0 && foreignWorlds.Any(w => applied.Contains(w)))
+                {
+                    AffixLogger.Warn("SERVICE", $"这些遗产来源世界已记录为应用过（{string.Join(",", foreignWorlds)}），手动应用跳过以避免重复创建");
+                    return LegacyOperationResult.Skipped("该批遗产来源世界已应用过");
+                }
+                if (!string.IsNullOrEmpty(legacyData.WorldId) && applied.Contains(legacyData.WorldId))
+                {
+                    AffixLogger.Warn("SERVICE", $"世界状态来源 {legacyData.WorldId} 已导入过，手动应用跳过");
+                    return LegacyOperationResult.Skipped("世界状态来源已应用过");
+                }
+
+                return ExecuteImport(legacyData, heroes, foreignWorlds);
+            }
+            catch (Exception ex)
+            {
+                AffixLogger.Error("SERVICE", "强制导入失败", ex);
+                return LegacyOperationResult.Failed(ex.Message);
+            }
+        }
+
         internal static string ConsumePendingCompatibilityNotice()
         {
             string notice = _pendingCompatibilityNotice;
@@ -150,10 +137,92 @@ namespace LegacyWorld.Bannerlord
 
         public static string GetCurrentWorldId() => _adapter?.GetWorldId() ?? "unknown";
 
+        private static HashSet<string> CollectForeignWorlds(LegacyData legacyData, string currentWorldId)
+        {
+            var worlds = new HashSet<string>();
+            if (legacyData?.HeroProfiles == null) return worlds;
+            foreach (var profile in legacyData.HeroProfiles)
+            {
+                if (profile != null && !string.IsNullOrEmpty(profile.WorldId) && profile.WorldId != currentWorldId)
+                    worlds.Add(profile.WorldId);
+            }
+            return worlds;
+        }
+
+        private static LegacyOperationResult ExecuteImport(LegacyData legacyData, HeroProfileList heroes, HashSet<string> foreignWorlds)
+        {
+            string currentWorldId = _adapter.GetWorldId();
+            var persistenceHeroes = heroes ?? new HeroProfileList
+            {
+                Profiles = legacyData.HeroProfiles != null
+                    ? new List<HeroProfile>(legacyData.HeroProfiles)
+                    : new List<HeroProfile>()
+            };
+            if (persistenceHeroes.Profiles == null) persistenceHeroes.Profiles = new List<HeroProfile>();
+            if (persistenceHeroes.AppliedWorldIds == null) persistenceHeroes.AppliedWorldIds = new List<string>();
+            if (persistenceHeroes.ResurrectedHeroes == null) persistenceHeroes.ResurrectedHeroes = new List<ResurrectedHeroRecord>();
+
+            int retrySkipped = SkipAlreadyRestoredHeroesForCurrentWorld(legacyData, persistenceHeroes, currentWorldId);
+            if (retrySkipped > 0)
+                AffixLogger.Info("SERVICE", $"部分失败重试：当前世界已有 {retrySkipped} 个成功复刻英雄，跳过重复创建");
+
+            ResurrectedHeroTracker.Clear();
+            var importSettings = BuildEffectiveImportSettings();
+            AffixLogger.Info("SERVICE", $"开始导入：世界状态来源={legacyData.WorldId}, 人物模板={legacyData.HeroProfiles?.Count ?? 0} 个（其它来源世界 {foreignWorlds.Count} 个）");
+            ImportResult result = LegacyImporter.Apply(_adapter, legacyData, importSettings);
+            AffixLogger.Info("SERVICE",
+                $"导入完成: {result.KingdomsRestored} 王国 / {result.ClansRestored} 家族 / {result.SettlementsRestored} 定居点 / {result.HeroesResurrected} 英雄(新建) / {result.HeroesResurrectFailed} 英雄异常");
+
+            bool recordsSaved = PersistResurrectedHeroRecords(persistenceHeroes, currentWorldId);
+            if (result.HeroesResurrectFailed > 0)
+            {
+                AffixLogger.Warn("SERVICE", "导入部分完成：存在英雄复刻异常，不写入 AppliedWorldIds，允许后续重试");
+                return LegacyOperationResult.Partial($"导入部分完成：{result.HeroesResurrectFailed} 个英雄复刻失败");
+            }
+            if (!recordsSaved)
+            {
+                AffixLogger.Warn("SERVICE", "导入部分完成：复刻记录未能持久化，不写入 AppliedWorldIds");
+                return LegacyOperationResult.Partial("导入已执行，但复刻记录持久化失败");
+            }
+
+            if (!SaveAppliedWorlds(persistenceHeroes, foreignWorlds, legacyData.WorldId))
+                return LegacyOperationResult.Partial("导入已执行，但已应用世界标记写入失败");
+
+            return LegacyOperationResult.Applied("世界遗产已完整应用");
+        }
+
         /// <summary>
-        /// 读取 Legacy.json（世界状态）与 LegacyHeroes.json（玩家人物遗产），
-        /// 将玩家人物遗产合并进 LegacyData.HeroProfiles 供导入使用。
+        /// 部分失败后再次应用时，已经成功复刻且仍存在于当前目标世界的 LegacyId 不再重复创建。
+        /// 只使用带 TargetWorldId 的新记录；旧记录没有目标世界信息，不参与该优化。
         /// </summary>
+        private static int SkipAlreadyRestoredHeroesForCurrentWorld(LegacyData legacyData, HeroProfileList heroes, string currentWorldId)
+        {
+            if (legacyData?.HeroProfiles == null || heroes?.ResurrectedHeroes == null || string.IsNullOrEmpty(currentWorldId))
+                return 0;
+
+            var aliveHeroIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var hero in Hero.AllAliveHeroes)
+            {
+                if (hero != null && hero.IsAlive && !string.IsNullOrWhiteSpace(hero.StringId))
+                    aliveHeroIds.Add(hero.StringId);
+            }
+
+            var restoredLegacyIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var record in heroes.ResurrectedHeroes)
+            {
+                if (record == null || string.IsNullOrWhiteSpace(record.LegacyId) || string.IsNullOrWhiteSpace(record.HeroStringId)) continue;
+                if (!string.Equals(record.TargetWorldId, currentWorldId, StringComparison.Ordinal)) continue;
+                if (aliveHeroIds.Contains(record.HeroStringId)) restoredLegacyIds.Add(record.LegacyId);
+            }
+
+            if (restoredLegacyIds.Count == 0) return 0;
+            int before = legacyData.HeroProfiles.Count;
+            legacyData.HeroProfiles = legacyData.HeroProfiles
+                .Where(p => p == null || string.IsNullOrWhiteSpace(p.LegacyId) || !restoredLegacyIds.Contains(p.LegacyId))
+                .ToList();
+            return before - legacyData.HeroProfiles.Count;
+        }
+
         private static (LegacyData, HeroProfileList) LoadCombined()
         {
             string json = LegacyStorage.Read();
@@ -166,66 +235,45 @@ namespace LegacyWorld.Bannerlord
             if (!string.IsNullOrEmpty(heroJson))
             {
                 heroes = LegacySerializer.DeserializeHeroes(heroJson);
-                if (heroes != null && heroes.Profiles != null)
-                {
+                if (heroes?.Profiles != null)
                     legacyData.HeroProfiles = new List<HeroProfile>(heroes.Profiles);
-                }
-                if (legacyData.HeroProfiles == null) legacyData.HeroProfiles = new List<HeroProfile>();
             }
+            if (legacyData.HeroProfiles == null) legacyData.HeroProfiles = new List<HeroProfile>();
             return (legacyData, heroes);
         }
 
-        /// <summary>
-        /// 把本次成功导入的遗产来源世界持久化进 LegacyHeroes.json 的 AppliedWorldIds，
-        /// 跨进程生效，避免重开游戏后再次导入时重复复刻同一世界的遗留 NPC。
-        /// </summary>
-        private static void SaveAppliedWorlds(HeroProfileList heroes, HashSet<string> foreignWorlds, string stateWorldId = null)
+        private static bool SaveAppliedWorlds(HeroProfileList heroes, HashSet<string> foreignWorlds, string stateWorldId = null)
         {
             try
             {
-                if (heroes == null) return;
+                if (heroes == null) return false;
                 if (heroes.AppliedWorldIds == null) heroes.AppliedWorldIds = new List<string>();
                 bool changed = false;
                 foreach (var w in foreignWorlds)
                 {
+                    if (string.IsNullOrEmpty(w)) continue;
                     if (!heroes.AppliedWorldIds.Contains(w)) { heroes.AppliedWorldIds.Add(w); changed = true; }
                 }
-                // 世界状态来源世界也一并持久化，供「立即应用」做去重（见 ForceImport #1）。
                 if (!string.IsNullOrEmpty(stateWorldId) && !heroes.AppliedWorldIds.Contains(stateWorldId))
                 {
                     heroes.AppliedWorldIds.Add(stateWorldId); changed = true;
                 }
-                if (changed)
-                {
-                    LegacyStorage.WriteHeroes(LegacySerializer.SerializeHeroes(heroes));
+
+                if (!changed) return true;
+                bool ok = LegacyStorage.WriteHeroes(LegacySerializer.SerializeHeroes(heroes));
+                if (ok)
                     AffixLogger.Info("SERVICE", $"已持久化已导入世界: {string.Join(",", heroes.AppliedWorldIds)}");
-                }
+                else
+                    AffixLogger.Error("SERVICE", "已导入世界标记写入失败；下次启动仍会允许重试");
+                return ok;
             }
-            catch (Exception ex) { AffixLogger.Error("SERVICE", "持久化已导入世界失败", ex); }
+            catch (Exception ex)
+            {
+                AffixLogger.Error("SERVICE", "持久化已导入世界失败", ex);
+                return false;
+            }
         }
 
-        private static bool ApplyImport(LegacyData legacyData, HeroProfileList heroes, HashSet<string> foreignWorlds)
-        {
-            ResurrectedHeroTracker.Clear();
-            var importSettings = BuildEffectiveImportSettings();
-            AffixLogger.Info("SERVICE", $"开始导入：世界状态来源={legacyData.WorldId}, 玩家人物遗产={heroes?.Profiles.Count ?? 0} 个（含其它世界 {foreignWorlds.Count} 个）");
-            var result = LegacyImporter.Apply(_adapter, legacyData, importSettings);
-            AffixLogger.Info("SERVICE",
-                $"导入完成: {result.KingdomsRestored} 王国 / {result.ClansRestored} 家族 / {result.SettlementsRestored} 定居点 / {result.HeroesResurrected} 英雄(新建)");
-
-            // 边界修复（#8 验证 UI 误报）：把本次成功复刻的英雄写进持久化文件（跨进程），
-            // 这样即便玩家先导入、再读档（内存 ResurrectedHeroTracker 被清空），
-            // 「列出已复刻英雄」按钮仍能从文件读到上次导入的真实记录。
-            PersistResurrectedHeroRecords(heroes);
-            return true;
-        }
-
-
-        /// <summary>
-        /// Bannerlord 1.5 高级开局兼容。
-        /// 原版世界场景/政治身份优先；只关闭会覆盖政治与领地结构的子项，
-        /// 家族经济、定居点繁荣度和英雄复刻仍按普通导入设置执行。
-        /// </summary>
         private static LegacySettings BuildEffectiveImportSettings()
         {
             LegacyWorldSettingsManager.RefreshSettings();
@@ -291,54 +339,76 @@ namespace LegacyWorld.Bannerlord
 
         private static bool IsPoliticalAdvancedStartType(string startType)
         {
-            if (string.IsNullOrEmpty(startType))
-                return false;
-
+            if (string.IsNullOrEmpty(startType)) return false;
             return string.Equals(startType, "king", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(startType, "vassal", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(startType, "mercenary", StringComparison.OrdinalIgnoreCase)
                    || string.Equals(startType, "fleetadmiral", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>
-        /// 将 ResurrectedHeroTracker 中本次成功的复刻记录同步进 LegacyHeroes.json，
-        /// 供验证 UI 跨进程回退读取（解决读档后内存表清空导致误报"无记录"）。
-        /// </summary>
-        private static void PersistResurrectedHeroRecords(HeroProfileList heroes)
+        private static bool PersistResurrectedHeroRecords(HeroProfileList heroes, string targetWorldId)
         {
             try
             {
-                if (heroes == null) return;
+                if (heroes == null) return false;
                 if (heroes.ResurrectedHeroes == null) heroes.ResurrectedHeroes = new List<ResurrectedHeroRecord>();
                 bool changed = false;
+
                 foreach (var e in ResurrectedHeroTracker.Entries)
                 {
-                    if (e.Status == "成功" && !heroes.ResurrectedHeroes.Any(r => r.Name == e.Name && r.WorldId == e.WorldId))
+                    if (e.Status != "成功") continue;
+
+                    ResurrectedHeroRecord existing;
+                    if (!string.IsNullOrWhiteSpace(e.LegacyId))
                     {
-                        heroes.ResurrectedHeroes.Add(new ResurrectedHeroRecord
-                        {
-                            Name = e.Name,
-                            Source = e.Source,
-                            WorldId = e.WorldId,
-                            Level = e.Level,
-                            CultureId = e.CultureId,
-                            RestoredAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
-                        });
-                        changed = true;
+                        existing = heroes.ResurrectedHeroes.FirstOrDefault(r =>
+                            r != null &&
+                            string.Equals(r.LegacyId, e.LegacyId, StringComparison.Ordinal) &&
+                            string.Equals(r.TargetWorldId, targetWorldId, StringComparison.Ordinal));
                     }
+                    else
+                    {
+                        existing = heroes.ResurrectedHeroes.FirstOrDefault(r =>
+                            r != null &&
+                            string.IsNullOrWhiteSpace(r.LegacyId) &&
+                            r.Name == e.Name &&
+                            r.WorldId == e.WorldId &&
+                            string.Equals(r.TargetWorldId, targetWorldId, StringComparison.Ordinal));
+                    }
+
+                    if (existing == null)
+                    {
+                        existing = new ResurrectedHeroRecord();
+                        heroes.ResurrectedHeroes.Add(existing);
+                    }
+
+                    existing.LegacyId = e.LegacyId;
+                    existing.HeroStringId = e.HeroStringId;
+                    existing.TargetWorldId = targetWorldId;
+                    existing.Name = e.Name;
+                    existing.Source = e.Source;
+                    existing.WorldId = e.WorldId;
+                    existing.Level = e.Level;
+                    existing.CultureId = e.CultureId;
+                    existing.RestoredAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                    changed = true;
                 }
-                if (changed) LegacyStorage.WriteHeroes(LegacySerializer.SerializeHeroes(heroes));
+
+                if (!changed) return true;
+                bool ok = LegacyStorage.WriteHeroes(LegacySerializer.SerializeHeroes(heroes));
+                if (!ok) AffixLogger.Warn("SERVICE", "复刻英雄记录写入失败，部分失败重试保护不可用");
+                return ok;
             }
             catch (Exception ex)
             {
                 AffixLogger.Warn("SERVICE", $"持久化复刻记录失败: {ex.Message}");
+                return false;
             }
         }
 
         private static bool _adapterIsReady()
         {
             if (_adapter == null) { AffixLogger.Error("SERVICE", "适配器未初始化，请先调用 Initialize()"); return false; }
-            // 边界：Campaign 未就绪（如主菜单/战役加载前）时调用会 NRE，提前拦截。
             if (Campaign.Current == null) { AffixLogger.Warn("SERVICE", "当前无进行中的战役，跳过（Campaign 未就绪）"); return false; }
             return true;
         }

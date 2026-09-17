@@ -1,9 +1,8 @@
 using System;
+using System.Linq;
 using TaleWorlds.CampaignSystem;
-using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.Core;
-using TaleWorlds.Localization;
 using TaleWorlds.SaveSystem;
 using LegacyWorld.Core;
 using LegacyWorld.Core.Models;
@@ -12,25 +11,19 @@ using TaleWorlds.Library;
 
 namespace LegacyWorld.Bannerlord
 {
-    /// <summary>
-    /// LegacyWorld 的 CampaignBehavior 集成层。
-    /// 负责挂钩存档/新游戏/小时事件，但不包含业务逻辑（委托给 LegacyService）。
-    /// </summary>
+    /// <summary>CampaignBehavior 集成层：保存导出、新游戏导入、MCM 手动操作与验证。</summary>
     public class LegacyBehavior : CampaignBehaviorBase
     {
-        private bool _applied = false;          // 当前存档是否已导入
-        private string _appliedWorldId = null;  // 已应用的世界 ID（备份用）
+        private bool _applied = false;
+        private string _appliedWorldId = null;
 
         public override void RegisterEvents()
         {
             CampaignEvents.OnBeforeSaveEvent.AddNonSerializedListener(this, OnBeforeSave);
-            // 1.5 高级开局世界场景在 OnNewGameCreatedEvent 中重构王国/领地。
-            // LegacyWorld 必须等待所有新游戏 FollowUp 完成后再导入，避免提前制造叛军 Clan 等状态污染原版场景处理。
             CampaignEvents.OnNewGameCreatedPartialFollowUpEndEvent.AddNonSerializedListener(this, OnNewGameCreated);
             CampaignEvents.TickEvent.AddNonSerializedListener(this, OnCampaignTick);
             CampaignEvents.HourlyTickEvent.AddNonSerializedListener(this, OnTick);
 
-            // 注入手动按钮的执行体，使 MCM 点击即时生效（无需等待 HourlyTick）
             LegacyWorldSettingsManager.RunManualExport = DoManualExport;
             LegacyWorldSettingsManager.RunManualApply = DoManualApply;
             LegacyWorldSettingsManager.RunListResurrected = DoListResurrected;
@@ -44,7 +37,6 @@ namespace LegacyWorld.Bannerlord
 
         private void OnBeforeSave()
         {
-            // 仅在有活动战役时导出，避免主菜单保存导致空世界文件
             if (Campaign.Current == null) return;
             try { LegacyService.Export(); }
             catch (Exception ex) { AffixLogger.Error("BEHAVIOR", $"OnBeforeSave 导出异常: {ex.Message}", ex); }
@@ -54,22 +46,25 @@ namespace LegacyWorld.Bannerlord
         {
             try
             {
-                if (LegacyWorldSettingsManager.Settings.Enabled)
-                {
-                    LegacyService.Import();
-                    _applied = true;
-                    _appliedWorldId = LegacyService.GetCurrentWorldId();
-                    AffixLogger.Info("BEHAVIOR", $"新游戏自动导入完成，标记 _applied=true (world={_appliedWorldId})");
-                }
-                else
+                if (!LegacyWorldSettingsManager.Settings.Enabled)
                 {
                     AffixLogger.Info("BEHAVIOR", "系统未启用，跳过新游戏导入");
+                    return;
                 }
+
+                LegacyOperationResult result = LegacyService.Import();
+                _applied = result.FullyApplied;
+                _appliedWorldId = result.FullyApplied ? LegacyService.GetCurrentWorldId() : null;
+                AffixLogger.Info("BEHAVIOR", $"新游戏导入结果: {result.Status} | {result.Message}");
+
+                if (result.Status == LegacyOperationStatus.Partial)
+                    InformationManager.DisplayMessage(new InformationMessage($"[LegacyWorld] 遗产部分应用：{result.Message}", Colors.Yellow));
+                else if (result.Status == LegacyOperationStatus.Failed)
+                    InformationManager.DisplayMessage(new InformationMessage($"[LegacyWorld] 遗产应用失败：{result.Message}", Colors.Red));
             }
             catch (Exception ex) { AffixLogger.Error("BEHAVIOR", $"OnNewGameCreated 导入异常: {ex.Message}", ex); }
         }
 
-        // 手动按钮即时执行体（注入到 SettingsManager）
         private void DoManualExport()
         {
             if (Campaign.Current == null)
@@ -79,8 +74,8 @@ namespace LegacyWorld.Bannerlord
             }
             try
             {
-                LegacyService.Export(force: true);
-                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 已手动导出世界状态", Colors.Green));
+                if (!LegacyService.Export(force: true))
+                    InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 手动导出未完成，请查看 LegacyWorld.log", Colors.Yellow));
             }
             catch (Exception ex)
             {
@@ -98,8 +93,22 @@ namespace LegacyWorld.Bannerlord
             }
             try
             {
-                LegacyService.ForceImport();
-                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 已手动应用世界遗产", Colors.Green));
+                LegacyOperationResult result = LegacyService.ForceImport();
+                switch (result.Status)
+                {
+                    case LegacyOperationStatus.Applied:
+                        InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 已手动应用世界遗产", Colors.Green));
+                        break;
+                    case LegacyOperationStatus.Partial:
+                        InformationManager.DisplayMessage(new InformationMessage($"[LegacyWorld] 部分应用：{result.Message}", Colors.Yellow));
+                        break;
+                    case LegacyOperationStatus.Skipped:
+                        InformationManager.DisplayMessage(new InformationMessage($"[LegacyWorld] 未应用：{result.Message}", Colors.Yellow));
+                        break;
+                    default:
+                        InformationManager.DisplayMessage(new InformationMessage($"[LegacyWorld] 应用失败：{result.Message}", Colors.Red));
+                        break;
+                }
             }
             catch (Exception ex)
             {
@@ -108,7 +117,6 @@ namespace LegacyWorld.Bannerlord
             }
         }
 
-        // 验证按钮：列出本模组复刻到当前世界的英雄（控制台级快速核查）
         private void DoListResurrected()
         {
             if (Campaign.Current == null)
@@ -116,17 +124,11 @@ namespace LegacyWorld.Bannerlord
                 InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 需在游戏中执行", Colors.Yellow));
                 return;
             }
-            var entries = LegacyWorld.Core.Models.ResurrectedHeroTracker.Entries;
+            var entries = ResurrectedHeroTracker.Entries;
             if (entries.Count == 0)
             {
-                // 边界修复（#8 验证 UI 误报）：内存表在新游戏/读档后会被清空，
-                // 但复刻记录已持久化进 LegacyHeroes.json。回退读取文件记录，
-                // 避免玩家先导入再读档后误以为「没生效」。
-                if (TryListResurrectedFromDisk())
-                    return;
-
-                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 当前没有已复刻的英雄记录（本会话与文件中均无）。可先「手动应用世界状态」或开新档。", Colors.Yellow));
-                AffixLogger.Info("BEHAVIOR", "验证：复刻英雄表为空");
+                if (TryListResurrectedFromDisk()) return;
+                InformationManager.DisplayMessage(new InformationMessage("[LegacyWorld] 当前没有已复刻的英雄记录。", Colors.Yellow));
                 return;
             }
 
@@ -138,12 +140,11 @@ namespace LegacyWorld.Bannerlord
                 string status;
                 if (e.Status != "成功")
                 {
-                    status = e.Status; // 复刻失败原因
+                    status = e.Status;
                 }
                 else
                 {
-                    // 不依赖可能随存档失效的 HeroStringId，改用姓名在当前游戏的 Hero.All 中查找游荡英雄。
-                    var hero = FindWandererByName(e.Name);
+                    var hero = FindWanderer(e.HeroStringId, e.Name);
                     bool exists = hero != null;
                     bool isAlive = exists && hero.IsAlive;
                     bool isWanderer = exists && hero.IsWanderer;
@@ -155,29 +156,27 @@ namespace LegacyWorld.Bannerlord
                 AffixLogger.Info("VERIFY", line);
             }
             sb.AppendLine($"成功存活/游荡中：{alive}/{entries.Count}");
-            InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), TaleWorlds.Library.Colors.Green));
-            AffixLogger.Info("BEHAVIOR", $"验证：已复刻英雄 {entries.Count} 名，成功且存活 {alive} 名");
+            InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), Colors.Green));
         }
 
-        /// <summary>
-        /// 在当前游戏中按姓名查找复刻出的游荡英雄。
-        /// 使用 Hero.AllAliveHeroes 而非可能随存读档失效的 StringId，避免误报“对象缺失”。
-        /// </summary>
-        private TaleWorlds.CampaignSystem.Hero FindWandererByName(string name)
+        private Hero FindWanderer(string heroStringId, string name)
         {
-            if (string.IsNullOrEmpty(name)) return null;
-            foreach (var h in TaleWorlds.CampaignSystem.Hero.AllAliveHeroes)
+            foreach (var h in Hero.AllAliveHeroes)
             {
-                if (h == null || !h.IsActive) continue;
-                if (h.IsWanderer && h.Name != null && h.Name.ToString() == name) return h;
+                if (h == null || !h.IsActive || !h.IsWanderer) continue;
+                if (!string.IsNullOrWhiteSpace(heroStringId) && string.Equals(h.StringId, heroStringId, StringComparison.Ordinal))
+                    return h;
+            }
+
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (var h in Hero.AllAliveHeroes)
+            {
+                if (h == null || !h.IsActive || !h.IsWanderer) continue;
+                if (h.Name != null && h.Name.ToString() == name) return h;
             }
             return null;
         }
 
-        /// <summary>
-        /// 回退：从 LegacyHeroes.json 读取上次导入持久化的复刻记录并展示。
-        /// 用于内存 ResurrectedHeroTracker 已清空（读档/新游戏）时的验证。
-        /// </summary>
         private bool TryListResurrectedFromDisk()
         {
             try
@@ -185,25 +184,31 @@ namespace LegacyWorld.Bannerlord
                 var json = LegacyWorld.Core.Storage.LegacyStorage.ReadHeroes();
                 if (string.IsNullOrEmpty(json)) return false;
                 var heroes = LegacyWorld.Core.Serialization.LegacySerializer.DeserializeHeroes(json);
-                var records = heroes?.ResurrectedHeroes;
-                if (records == null || records.Count == 0) return false;
+                var allRecords = heroes?.ResurrectedHeroes;
+                if (allRecords == null || allRecords.Count == 0) return false;
+
+                string currentWorldId = LegacyService.GetCurrentWorldId();
+                var records = allRecords
+                    .Where(r => r != null && (string.IsNullOrEmpty(r.TargetWorldId) || r.TargetWorldId == currentWorldId))
+                    .ToList();
+                if (records.Count == 0) return false;
 
                 var sb = new System.Text.StringBuilder();
-                sb.AppendLine($"[LegacyWorld] 文件中共有 {records.Count} 条已复刻记录（来自上次导入，当前内存表已清空）：");
+                sb.AppendLine($"[LegacyWorld] 当前世界共有 {records.Count} 条已复刻记录：");
                 int aliveNow = 0;
                 foreach (var r in records)
                 {
-                    bool exists = false, isAlive = false;
-                    var h = FindWandererByName(r.Name);
-                    if (h != null) { exists = true; isAlive = h.IsAlive; if (isAlive) aliveNow++; }
+                    var h = FindWanderer(r.HeroStringId, r.Name);
+                    bool exists = h != null;
+                    bool isAlive = exists && h.IsAlive;
+                    if (isAlive) aliveNow++;
                     string status = !exists ? "对象不在当前世界" : (isAlive ? "存活中" : "已死亡");
                     string line = $"  • {r.Name}（{r.Source}, Lv{r.Level}, 文化={r.CultureId}）→ {status} [导入于 {r.RestoredAt}]";
                     sb.AppendLine(line);
                     AffixLogger.Info("VERIFY", line);
                 }
                 sb.AppendLine($"仍存活于当前世界：{aliveNow}/{records.Count}");
-                InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), TaleWorlds.Library.Colors.Green));
-                AffixLogger.Info("BEHAVIOR", $"验证（文件回退）：已复刻记录 {records.Count} 条，当前存活 {aliveNow} 条");
+                InformationManager.DisplayMessage(new InformationMessage(sb.ToString(), Colors.Green));
                 return true;
             }
             catch (Exception ex)
@@ -213,18 +218,11 @@ namespace LegacyWorld.Bannerlord
             }
         }
 
-        /// <summary>
-        /// 高级开局兼容提示必须等地图状态真正激活后再显示。
-        /// 原版 GauntletQueryManager 使用 InformationManager.ShowInquiry 渲染 SingleQueryPopup。
-        /// </summary>
         private void OnCampaignTick(float dt)
         {
-            if (!(GameStateManager.Current?.ActiveState is MapState))
-                return;
-
+            if (!(GameStateManager.Current?.ActiveState is MapState)) return;
             string notice = LegacyService.ConsumePendingCompatibilityNotice();
-            if (string.IsNullOrEmpty(notice))
-                return;
+            if (string.IsNullOrEmpty(notice)) return;
 
             InformationManager.ShowInquiry(
                 new InquiryData(
@@ -240,17 +238,12 @@ namespace LegacyWorld.Bannerlord
                 prioritize: true);
         }
 
-        // 兜底：若 runner 未被注入（极少见），仍由 HourlyTick 消费标志执行
         private void OnTick()
         {
             if (LegacyWorldSettingsManager.RunManualExport == null && LegacyWorldSettingsManager.TryConsumeManualExport())
-            {
                 DoManualExport();
-            }
             if (LegacyWorldSettingsManager.RunManualApply == null && LegacyWorldSettingsManager.TryConsumeManualApply())
-            {
                 DoManualApply();
-            }
         }
     }
 }

@@ -6,10 +6,9 @@ obj/
 # Runtime logs & generated data
 *.log
 *.user
+Legacy.json
+LegacyHeroes.json
 
 # OS
 Thumbs.db
 .DS_Store
-
-# Generated runtime data
-Legacy.json
